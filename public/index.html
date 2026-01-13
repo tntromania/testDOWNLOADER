@@ -450,20 +450,35 @@
                     throw new Error("Nu am găsit un link de download valid.");
                 }
 
-                let infoHtml = `
-                    <h3>🎥 ${data.data.title}</h3>
-                    <p>⏱️ ${data.data.duration} • 📦 ${selectedFormat.toUpperCase()}</p>
-                `;
-                videoInfo.innerHTML = infoHtml;
-                videoInfo.classList.add('show');
-                statusCard.classList.add('show');
+// În interiorul funcției processVideo, după ce primești "data":
+                if (data.status === 'ok') {
+                    // ... logica de selectare downloadLink ...
 
-                const link = document.createElement('a');
-                link.href = downloadLink.url;
-                link.setAttribute('download', '');
-                document.body.appendChild(link);
-                link.click();
-                document.body.removeChild(link);
+                    // AFISARE INFO (Aici era problema cu durata)
+                    let infoHtml = `
+        <div style="text-align:center; padding: 20px;">
+            <h3 style="margin-bottom:10px;">🎥 ${data.data.title}</h3>
+            <p style="font-size: 1.1em; color: #aaa;">⏱️ Durată: ${data.data.duration} | 📦 Format: ${selectedFormat.toUpperCase()}</p>
+        </div>
+    `;
+
+                    videoInfo.innerHTML = infoHtml;
+                    videoInfo.classList.add('show');
+                    statusCard.classList.add('show');
+
+                    // Resetăm loading-ul înainte de a pleca spre download
+                    loading.classList.remove('show');
+
+                    // Executăm download-ul
+                    const link = document.createElement('a');
+                    link.href = downloadLink.url;
+                    link.setAttribute('download', '');
+                    document.body.appendChild(link);
+                    link.click();
+                    document.body.removeChild(link);
+
+                    // ... restul logicii pentru transcript ...
+                }
 
                 addToHistory(data.data.title, targetUrl);
 

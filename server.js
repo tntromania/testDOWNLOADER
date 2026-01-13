@@ -170,7 +170,7 @@ app.get('/api/download', async (req, res) => {
     if (!videoUrl) return res.status(400).json({ error: 'URL lipsă' });
 
     const platform = detectPlatform(videoUrl);
-    console.log(`[${platform.toUpperCase()}] Cerere: ${videoUrl}`);
+    console.log(`[${platform.toUpperCase()}] Cerere info: ${videoUrl}`);
 
     try {
         const metadata = await getYtMetadata(videoUrl);
@@ -187,6 +187,9 @@ app.get('/api/download', async (req, res) => {
             };
         }
 
+        // IMPORTANT: Verificăm dacă duration_string există, altfel folosim duration (secunde)
+        const displayDuration = metadata.duration_string || metadata.duration || "N/A";
+
         const formats = [
             { quality: 'Audio Only (MP3)', url: `/api/stream?type=audio&url=${encodeURIComponent(videoUrl)}` },
             { quality: 'Video HD (MP4)', url: `/api/stream?type=video&url=${encodeURIComponent(videoUrl)}` }
@@ -195,37 +198,41 @@ app.get('/api/download', async (req, res) => {
         res.json({
             status: 'ok',
             data: {
-                title: metadata.title,
-                duration: metadata.duration_string,
+                title: metadata.title || "Video",
+                duration: displayDuration, // Trimitem variabila pe care o caută frontend-ul
                 formats: formats,
                 transcript: transcriptData
             }
         });
     } catch (error) {
-        console.error("Eroare generală:", error);
-        res.status(500).json({ error: 'Eroare internă la procesare.' });
+        console.error("Eroare API Download:", error);
+        res.status(500).json({ error: 'Eroare la obținerea informațiilor.' });
     }
 });
 
 app.get('/api/stream', (req, res) => {
     const { url, type } = req.query;
-    const filename = type === 'audio' ? 'audio.mp3' : 'video.mp4';
+    const isAudio = type === 'audio';
+    const filename = isAudio ? 'audio.mp3' : 'video.mp4';
     
+    // Setăm Header-ul corect pentru tipul de fișier
+    res.setHeader('Content-Type', isAudio ? 'audio/mpeg' : 'video/mp4');
     res.setHeader('Content-Disposition', `attachment; filename="${filename}"`);
     
     const args = [
         '-o', '-', 
         '--no-check-certificates', 
         '--force-ipv4', 
-        '-f', type === 'audio' ? 'bestaudio' : 'best', 
+        '-f', isAudio ? 'bestaudio' : 'best', 
         url
     ];
     
     const streamProcess = spawn(YTDLP_PATH, args);
     streamProcess.stdout.pipe(res);
-    
-    streamProcess.stderr.on('data', (data) => {
-        // Logăm erorile de streaming doar dacă e nevoie
+
+    streamProcess.on('error', (err) => {
+        console.error("Stream error:", err);
+        if (!res.headersSent) res.status(500).send("Stream failed");
     });
 });
 
