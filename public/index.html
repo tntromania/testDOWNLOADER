@@ -160,6 +160,7 @@
         .quality-btn:hover { color: #fff; border-color: #6366f1; }
         .quality-btn.active { background: #fff; color: #0f172a; font-weight: 700; }
 
+        /* --- VIDEO INFO (FĂRĂ THUMBNAIL) --- */
         .video-info {
             display: none;
             background: rgba(255, 255, 255, 0.05);
@@ -173,6 +174,7 @@
         .video-info h3 { margin: 0 0 5px 0; font-size: 1.1rem; color: #fff; }
         .video-info p { margin: 0; font-size: 0.9rem; color: #94a3b8; }
 
+        /* --- STATUS & TRANSCRIPT --- */
         .loading { display: none; text-align: center; padding: 40px; animation: fadeIn 0.5s; }
         .loading.show { display: block; }
         .spinner { width: 50px; height: 50px; border: 3px solid rgba(255,255,255,0.1); border-top-color: #818cf8; border-radius: 50%; animation: spin 1s infinite; margin: 0 auto 15px; }
@@ -209,6 +211,7 @@
         .error { display: none; }
         .error.show { display: block; background: rgba(239, 68, 68, 0.1); color: #fca5a5; padding: 15px; border-radius: 12px; margin-top: 20px; }
 
+        /* --- HISTORY SECTION (TEXT ONLY) --- */
         .history-section {
             background: rgba(30, 41, 59, 0.4);
             border: 1px solid rgba(255, 255, 255, 0.05);
@@ -242,11 +245,13 @@
         @keyframes spin { 100% { transform: rotate(360deg); } }
         @keyframes fadeIn { from { opacity: 0; transform: translateY(10px); } to { opacity: 1; transform: translateY(0); } }
         @keyframes slideUp { from { opacity: 0; transform: translateY(20px); } to { opacity: 1; transform: translateY(0); } }
+
     </style>
 </head>
 <body class="theme-youtube">
 
 <div class="app-wrapper">
+
     <div class="sidebar">
         <div class="nav-item active" data-platform="youtube" onclick="changePlatform('youtube', 'Paste YouTube link...')">
             <svg viewBox="0 0 24 24"><path d="M23.498 6.186a3.016 3.016 0 0 0-2.122-2.136C19.505 3.545 12 3.545 12 3.545s-7.505 0-9.377.505A3.017 3.017 0 0 0 .502 6.186C0 8.07 0 12 0 12s0 3.93.502 5.814a3.016 3.016 0 0 0 2.122 2.136c1.871.505 9.376.505 9.376.505s7.505 0 9.377-.505a3.015 3.015 0 0 0 2.122-2.136C24 15.93 24 12 24 12s0-3.93-.502-5.814zM9.545 15.568V8.432L15.818 12l-6.273 3.568z"/></svg>
@@ -269,8 +274,10 @@
                 <p id="pageSubtitle">Next-Gen Downloader & AI Translator</p>
             </div>
 
-            <div class="input-wrapper">
-                <input type="text" id="urlInput" placeholder="Paste YouTube Link here..." autocomplete="off">
+            <div class="input-group">
+                <div class="input-wrapper">
+                    <input type="text" id="urlInput" placeholder="Paste YouTube Link here..." autocomplete="off">
+                </div>
             </div>
 
             <div class="format-selector">
@@ -279,18 +286,18 @@
             </div>
 
             <div class="quality-selector" id="qualitySelector">
-                <button class="quality-btn" onclick="selectQuality('360')">360p</button>
-                <button class="quality-btn" onclick="selectQuality('480')">480p</button>
-                <button class="quality-btn" onclick="selectQuality('720')">720p</button>
-                <button class="quality-btn active" onclick="selectQuality('1080')">1080p</button>
-                <button class="quality-btn" onclick="selectQuality('1440')">2K</button>
-                <button class="quality-btn" onclick="selectQuality('2160')">4K</button>
+                <button class="quality-btn" data-quality="360" onclick="selectQuality('360')">360p</button>
+                <button class="quality-btn" data-quality="480" onclick="selectQuality('480')">480p</button>
+                <button class="quality-btn" data-quality="720" onclick="selectQuality('720')">720p</button>
+                <button class="quality-btn active" data-quality="1080" onclick="selectQuality('1080')">1080p</button>
+                <button class="quality-btn" data-quality="1440" onclick="selectQuality('1440')">2K</button>
+                <button class="quality-btn" data-quality="2160" onclick="selectQuality('2160')">4K</button>
             </div>
 
             <div class="quality-selector" id="audioQualitySelector" style="display: none;">
-                <button class="quality-btn" onclick="selectQuality('128')">128kbps</button>
-                <button class="quality-btn active" onclick="selectQuality('192')">192kbps</button>
-                <button class="quality-btn" onclick="selectQuality('320')">320kbps</button>
+                <button class="quality-btn" data-quality="128" onclick="selectQuality('128')">128kbps</button>
+                <button class="quality-btn active" data-quality="192" onclick="selectQuality('192')">192kbps</button>
+                <button class="quality-btn" data-quality="320" onclick="selectQuality('320')">320kbps</button>
             </div>
 
             <div class="loading" id="loading">
@@ -299,7 +306,9 @@
             </div>
 
             <div class="error" id="error"></div>
+
             <div class="video-info" id="videoInfo"></div>
+
             <div class="status-card" id="statusCard">
                 <h3>🚀 Download Initiated</h3>
                 <p>Check your downloads folder.</p>
@@ -318,8 +327,8 @@
                 <div class="transcript-box">
                     <h3>Romanian AI
                         <div class="btn-group">
-                            <button class="action-btn txt" onclick="downloadTxt('translation')">💾 TXT</button>
-                            <button class="action-btn" onclick="copyTranscript('translation')">COPY</button>
+                            <button class="action-btn txt" onclick="downloadTxt('translated')">💾 TXT</button>
+                            <button class="action-btn" onclick="copyTranscript('translated')">COPY</button>
                         </div>
                     </h3>
                     <div class="transcript-content" id="translatedTranscript"></div>
@@ -332,7 +341,8 @@
                 <h3>📜 Recent Downloads</h3>
                 <button class="clear-btn" onclick="clearHistory()">Clear History</button>
             </div>
-            <ul class="history-list" id="historyList"></ul>
+            <ul class="history-list" id="historyList">
+            </ul>
         </div>
     </div>
 </div>
@@ -340,9 +350,11 @@
 <script>
     const SERVER_ENDPOINT = '';
     let selectedFormat = 'mp4';
+    let currentVideoUrl = '';
     let currentPlatform = 'youtube';
     let debounceTimer;
 
+    // Elemente UI
     const urlInput = document.getElementById('urlInput');
     const loading = document.getElementById('loading');
     const error = document.getElementById('error');
@@ -354,7 +366,7 @@
     const historySection = document.getElementById('historySection');
     const historyList = document.getElementById('historyList');
 
-    // FIX ISTORIC: Definim loadHistory care randează lista la start
+    // --- FIX ISTORIC ---
     function loadHistory() { renderHistory(); }
     loadHistory();
 
@@ -362,6 +374,7 @@
         selectedFormat = format;
         document.querySelectorAll('.format-btn').forEach(btn => btn.classList.remove('active'));
         document.querySelector(`[data-format="${format}"]`).classList.add('active');
+
         document.getElementById('qualitySelector').style.display = (format === 'mp4') ? 'grid' : 'none';
         document.getElementById('audioQualitySelector').style.display = (format === 'mp3') ? 'grid' : 'none';
     }
@@ -369,7 +382,7 @@
     function selectQuality(quality) {
         const selector = selectedFormat === 'mp4' ? 'qualitySelector' : 'audioQualitySelector';
         document.querySelectorAll(`#${selector} .quality-btn`).forEach(btn => btn.classList.remove('active'));
-        event.target.classList.add('active');
+        if(event.target) event.target.classList.add('active');
     }
 
     function validatePlatformUrl(url, expectedPlatform) {
@@ -399,7 +412,7 @@
         videoInfo.classList.remove('show');
         statusCard.classList.remove('show');
         transcriptSection.classList.remove('show');
-        loading.querySelector('.loading-text').textContent = "Se descarcă și se traduce cu AI... ⏳";
+        loading.querySelector('.loading-text').textContent = "Se analizează și se traduce... ⏳";
 
         try {
             const response = await fetch(`/api/download?url=${encodeURIComponent(targetUrl)}`);
@@ -407,35 +420,46 @@
             const data = await response.json();
 
             if (data.status === 'ok') {
-                // Info interfață
+                // FIX: Mapare corectă date
+                const title = data.data.title || "Video";
+                const duration = data.data.duration || "N/A";
+
+                // 1. INFO CARD
                 videoInfo.innerHTML = `
                     <div style="text-align:center; padding: 20px;">
-                        <h3 style="margin-bottom:10px;">🎥 ${data.data.title}</h3>
-                        <p style="font-size: 1.1em; color: #aaa;">⏱️ Durată: ${data.data.duration} | 📦 Format: ${selectedFormat.toUpperCase()}</p>
-                    </div>`;
+                        <h3 style="margin-bottom:10px;">🎥 ${title}</h3>
+                        <p style="font-size: 1.1em; color: #aaa;">⏱️ Durată: ${duration} | 📦 Format: ${selectedFormat.toUpperCase()}</p>
+                    </div>
+                `;
                 videoInfo.classList.add('show');
                 statusCard.classList.add('show');
 
-                // FIX DOWNLOAD INSTANT: Găsim link-ul și îl declanșăm
-                const formats = data.data.formats;
-                let dl = (selectedFormat === 'mp4') ? formats.find(f => f.url.includes('type=video')) : formats.find(f => f.url.includes('type=audio'));
-                if (!dl) dl = formats[0];
-
-                const link = document.createElement('a');
-                link.href = dl.url;
-                link.setAttribute('download', '');
-                document.body.appendChild(link);
-                link.click();
-                document.body.removeChild(link);
-
-                // Transcript
+                // 2. TRANSCRIPT (cu fallback)
                 if (data.data.transcript) {
-                    originalTranscript.textContent = data.data.transcript.original;
-                    translatedTranscript.textContent = data.data.transcript.translated;
+                    originalTranscript.textContent = data.data.transcript.original || "Fără text.";
+                    translatedTranscript.textContent = data.data.transcript.translated || "Fără traducere.";
                     transcriptSection.classList.add('show');
                 }
-                addToHistory(data.data.title, targetUrl);
-            }
+
+                // 3. ISTORIC
+                addToHistory(title, targetUrl);
+
+                // 4. DOWNLOAD INSTANT (Auto-Click)
+                const formats = data.data.formats;
+                let finalLink = (selectedFormat === 'mp4')
+                    ? formats.find(f => f.quality === 'MP4')
+                    : formats.find(f => f.quality === 'MP3');
+
+                if (!finalLink) finalLink = formats[0];
+
+                const a = document.createElement('a');
+                a.href = finalLink.url;
+                a.style.display = 'none';
+                document.body.appendChild(a);
+                a.click();
+                setTimeout(() => document.body.removeChild(a), 100);
+
+            } else { throw new Error(data.error); }
         } catch (err) {
             error.textContent = '❌ ' + err.message;
             error.classList.add('show');
@@ -454,12 +478,14 @@
 
     function copyTranscript(type) {
         const id = type === 'original' ? 'originalTranscript' : 'translatedTranscript';
-        navigator.clipboard.writeText(document.getElementById(id).textContent).then(() => alert("Copiat!"));
+        const text = document.getElementById(id).textContent;
+        navigator.clipboard.writeText(text).then(() => alert("Copiat!"));
     }
 
     function downloadTxt(type) {
         const id = type === 'original' ? 'originalTranscript' : 'translatedTranscript';
-        const blob = new Blob([document.getElementById(id).textContent], {type: 'text/plain'});
+        const text = document.getElementById(id).textContent;
+        const blob = new Blob([text], {type: 'text/plain'});
         const a = document.createElement('a');
         a.href = URL.createObjectURL(blob);
         a.download = `transcript_${type}.txt`;
@@ -486,19 +512,23 @@
                     <span>${item.date}</span>
                 </div>
                 <div class="h-arrow">🔄</div>
-            </li>`).join('');
+            </li>
+        `).join('');
     }
 
-    function clearHistory() { localStorage.removeItem('dl_history'); renderHistory(); }
+    function clearHistory() {
+        localStorage.removeItem('dl_history');
+        renderHistory();
+    }
 
-    function changePlatform(p, ph) {
-        currentPlatform = p;
+    function changePlatform(platform, placeholder) {
+        currentPlatform = platform;
         urlInput.value = '';
-        document.body.className = `theme-${p}`;
+        document.body.className = `theme-${platform}`;
         document.querySelectorAll('.nav-item').forEach(i => i.classList.remove('active'));
-        document.querySelector(`[data-platform="${p}"]`).classList.add('active');
-        urlInput.placeholder = ph;
-        document.getElementById('pageTitle').textContent = p.charAt(0).toUpperCase() + p.slice(1) + ' Downloader';
+        document.querySelector(`[data-platform="${platform}"]`).classList.add('active');
+        urlInput.placeholder = placeholder;
+        document.getElementById('pageTitle').textContent = platform.charAt(0).toUpperCase() + platform.slice(1) + ' Downloader';
     }
 </script>
 </body>
