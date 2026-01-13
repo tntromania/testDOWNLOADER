@@ -9,15 +9,17 @@ const { translate } = require('@vitalets/google-translate-api');
 const app = express();
 const PORT = 3003;
 
+// --- CONFIGURARE ---
 app.use(cors());
 app.use(express.json());
+// Această linie este critică pentru a vedea interfața (index.html)
+app.use(express.static(path.join(__dirname, 'public')));
 
-// --- CHEIA TA OPENAI ---
+// Cheia se ia din variabilele de mediu setate în Coolify
 const OPENAI_API_KEY = process.env.OPENAI_API_KEY;
+const YTDLP_PATH = 'yt-dlp'; 
 
-const YTDLP_PATH = 'yt-dlp'; // Sistemul îl va lua automat din PATH după ce îl instalăm
-
-// --- DETECTARE PLATFORMĂ ---
+// --- 1. DETECTARE PLATFORMĂ ---
 function detectPlatform(url) {
     if (url.includes('youtube.com') || url.includes('youtu.be')) return 'youtube';
     if (url.includes('tiktok.com')) return 'tiktok';
@@ -26,7 +28,7 @@ function detectPlatform(url) {
     return 'unknown';
 }
 
-// --- 1. CURĂȚARE TEXT ---
+// --- 2. CURĂȚARE TEXT (VTT) ---
 function cleanVttText(vttContent) {
     if (!vttContent) return "";
     const lines = vttContent.split('\n');
@@ -45,9 +47,9 @@ function cleanVttText(vttContent) {
     return cleanText.join(' ');
 }
 
-// --- 2. TRADUCERE GOOGLE (FALLBACK) ---
+// --- 3. TRADUCERE GOOGLE (FALLBACK) ---
 async function translateWithGoogle(text) {
-    console.log("\n🔄 Trec pe Google Translate (Gratuit)...");
+    console.log("🔄 Fallback: Google Translate...");
     try {
         const res = await translate(text, { to: 'ro' });
         return res.text;
@@ -56,19 +58,18 @@ async function translateWithGoogle(text) {
     }
 }
 
-// --- 3. TRADUCERE GPT CU STREAMING (MATRIX STYLE) ---
+// --- 4. TRADUCERE GPT CU STREAMING ---
 async function translateWithGPT(text) {
     if (!text || text.length < 5) return "Nu există suficient text.";
-    const textToTranslate = text.substring(0, 3000);
+    const textToTranslate = text.substring(0, 3500); // Limităm pentru siguranță
 
-    console.log("\n🤖 GPT-4o-mini începe traducerea:");
-    console.log("------------------------------------------------");
+    console.log("\n🤖 GPT-4o-mini începe traducerea...");
 
     try {
         const response = await axios.post('https://api.openai.com/v1/chat/completions', {
             model: "gpt-4o-mini",
             messages: [
-                { "role": "system", "content": "Traduce în Română. Păstrează sensul dar fă-l să sune natural." },
+                { "role": "system", "content": "Traduce în Română. Păstrează sensul dar fă-l să sune natural. Nu adăuga alte comentarii." },
                 { "role": "user", "content": textToTranslate }
             ],
             temperature: 0.3,
@@ -86,11 +87,9 @@ async function translateWithGPT(text) {
         return new Promise((resolve, reject) => {
             response.data.on('data', (chunk) => {
                 const lines = chunk.toString().split('\n').filter(line => line.trim() !== '');
-                
                 for (const line of lines) {
                     const message = line.replace(/^data: /, '');
-                    if (message === '[DONE]') return; 
-                    
+                    if (message === '[DONE]') continue;
                     try {
                         const parsed = JSON.parse(message);
                         const content = parsed.choices[0].delta.content;
@@ -98,13 +97,12 @@ async function translateWithGPT(text) {
                             process.stdout.write(content); 
                             fullTranslation += content;
                         }
-                    } catch (error) {}
+                    } catch (e) {}
                 }
             });
 
             response.data.on('end', () => {
-                console.log("\n------------------------------------------------");
-                console.log("✅ Gata! Traducerea completă salvată.");
+                console.log("\n✅ Traducere GPT finalizată.");
                 resolve(fullTranslation);
             });
 
@@ -112,18 +110,18 @@ async function translateWithGPT(text) {
         });
 
     } catch (error) {
-        console.warn("\n⚠️ Eroare OpenAI Stream:", error.message);
+        console.warn("⚠️ Eroare OpenAI:", error.message);
         return await translateWithGoogle(text);
     }
 }
 
-// --- 4. LOGICA DOWNLOADER ---
+// --- 5. LOGICA EXTRAGERE TRANSCRIPT ---
 async function getOriginalTranscript(url) {
     const uniqueId = Date.now();
     const outputTemplate = path.join(__dirname, `trans_${uniqueId}`);
 
     return new Promise((resolve) => {
-        const process = spawn(YTDLP_PATH, [
+        const subProcess = spawn(YTDLP_PATH, [
             '--skip-download',
             '--write-sub', '--write-auto-sub',
             '--sub-lang', 'en',
@@ -133,7 +131,7 @@ async function getOriginalTranscript(url) {
             url
         ]);
 
-        process.on('close', () => {
+        subProcess.on('close', () => {
             const possibleFiles = [`${outputTemplate}.en.vtt`, `${outputTemplate}.en-orig.vtt`];
             let foundFile = possibleFiles.find(f => fs.existsSync(f));
 
@@ -149,51 +147,48 @@ async function getOriginalTranscript(url) {
     });
 }
 
+// --- 6. METADATE VIDEO ---
 function getYtMetadata(url) {
     return new Promise((resolve) => {
-        const process = spawn(YTDLP_PATH, ['--dump-json', '--no-warnings', '--no-check-certificates', url]);
+        const metaProcess = spawn(YTDLP_PATH, ['--dump-json', '--no-warnings', '--no-check-certificates', url]);
         let buffer = '';
-        process.stdout.on('data', d => buffer += d);
-        process.on('close', () => {
-            try { resolve(JSON.parse(buffer)); } catch (e) { resolve({ title: "Video", description: "" }); }
+        metaProcess.stdout.on('data', d => buffer += d);
+        metaProcess.on('close', () => {
+            try { 
+                resolve(JSON.parse(buffer)); 
+            } catch (e) { 
+                resolve({ title: "Video", duration_string: "0:00", description: "" }); 
+            }
         });
     });
 }
 
-// --- ENDPOINTS ---
+// --- 7. ENDPOINTS API ---
+
 app.get('/api/download', async (req, res) => {
     const videoUrl = req.query.url;
     if (!videoUrl) return res.status(400).json({ error: 'URL lipsă' });
 
     const platform = detectPlatform(videoUrl);
-    console.log(`\n[${platform.toUpperCase()}] Procesez: ${videoUrl}`);
+    console.log(`[${platform.toUpperCase()}] Cerere: ${videoUrl}`);
 
     try {
         const metadata = await getYtMetadata(videoUrl);
         let transcriptData = null;
 
-        // PROCESĂM TRANSCRIPTUL DOAR PENTRU YOUTUBE
         if (platform === 'youtube') {
-            console.log("📝 YouTube detectat - extrag transcript...");
             let originalText = await getOriginalTranscript(videoUrl);
-
-            if (!originalText) {
-                console.log("Fără subtitrare. Folosesc descrierea.");
-                originalText = metadata.description || "Niciun text găsit.";
-            }
-
-            const translatedText = await translateWithGPT(originalText);
+            if (!originalText) originalText = metadata.description || "Niciun text găsit.";
             
+            const translatedText = await translateWithGPT(originalText);
             transcriptData = {
                 original: originalText.substring(0, 1000) + "...",
                 translated: translatedText
             };
-        } else {
-            console.log(`⏩ ${platform} - skip transcript (doar download)`);
         }
 
         const formats = [
-            { quality: 'Audio Only (MP3)', url: `/api/stream?type=video&url=${encodeURIComponent(videoUrl)}` },
+            { quality: 'Audio Only (MP3)', url: `/api/stream?type=audio&url=${encodeURIComponent(videoUrl)}` },
             { quality: 'Video HD (MP4)', url: `/api/stream?type=video&url=${encodeURIComponent(videoUrl)}` }
         ];
 
@@ -203,24 +198,48 @@ app.get('/api/download', async (req, res) => {
                 title: metadata.title,
                 duration: metadata.duration_string,
                 formats: formats,
-                transcript: transcriptData // Null pentru non-YouTube
+                transcript: transcriptData
             }
         });
-
     } catch (error) {
-        console.error(error);
-        res.status(500).json({ error: 'Eroare internă.' });
+        console.error("Eroare generală:", error);
+        res.status(500).json({ error: 'Eroare internă la procesare.' });
     }
 });
 
 app.get('/api/stream', (req, res) => {
     const { url, type } = req.query;
-    res.setHeader('Content-Disposition', `attachment; filename="${type === 'audio' ? 'audio.mp3' : 'video.mp4'}"`);
-    const args = ['-o', '-', '--no-check-certificates', '--force-ipv4', '-f', type === 'audio' ? 'bestaudio' : 'best', url];
-    const process = spawn(YTDLP_PATH, args);
-    process.stdout.pipe(res);
+    const filename = type === 'audio' ? 'audio.mp3' : 'video.mp4';
+    
+    res.setHeader('Content-Disposition', `attachment; filename="${filename}"`);
+    
+    const args = [
+        '-o', '-', 
+        '--no-check-certificates', 
+        '--force-ipv4', 
+        '-f', type === 'audio' ? 'bestaudio' : 'best', 
+        url
+    ];
+    
+    const streamProcess = spawn(YTDLP_PATH, args);
+    streamProcess.stdout.pipe(res);
+    
+    streamProcess.stderr.on('data', (data) => {
+        // Logăm erorile de streaming doar dacă e nevoie
+    });
 });
 
-app.listen(PORT, () => {
-    console.log(`📥 Downloader Pro (Smart Transcript) pornit pe ${PORT}`);
+// Ruta de fallback pentru a trimite index.html
+app.get('*', (req, res) => {
+    res.sendFile(path.join(__dirname, 'public', 'index.html'));
+});
+
+// Pornire server
+app.listen(PORT, '0.0.0.0', () => {
+    console.log(`
+    🚀 Downloader Pro activ!
+    Domeniu: downloader.creatorsmart.ro
+    Port local: ${PORT}
+    ----------------------------------
+    `);
 });
