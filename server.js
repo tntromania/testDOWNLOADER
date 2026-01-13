@@ -13,7 +13,7 @@ app.use(cors());
 app.use(express.json());
 
 // --- CHEIA TA OPENAI ---
-const OPENAI_API_KEY = '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';
+const OPENAI_API_KEY = process.env.OPENAI_API_KEY;
 
 const YTDLP_PATH = 'yt-dlp'; // Sistemul îl va lua automat din PATH după ce îl instalăm
 
