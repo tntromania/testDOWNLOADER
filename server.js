@@ -57,7 +57,7 @@ function formatDuration(sec) {
 }
 
 function getYtMetadata(url) {
-    return new Promise((resolve, reject) => {
+    return new Promise((resolve) => {
         console.log(`🔍 Fetching metadata for: ${url}`);
         const p = spawn(YTDLP_PATH, [
             '--cookies', COOKIES_PATH,
@@ -86,7 +86,7 @@ function getYtMetadata(url) {
 }
 
 /* =========================
-   TRANSCRIPT (EN + EN-ORIG)
+   TRANSCRIPT (EN + fallback)
 ========================= */
 function getOriginalTranscript(url) {
     return new Promise((resolve) => {
@@ -112,8 +112,8 @@ function getOriginalTranscript(url) {
                 `${out}.en.vtt`,
                 `${out}.en-orig.vtt`
             ];
-
             const found = possibleFiles.find(f => fs.existsSync(f));
+
             if (!found) return resolve(null);
 
             try {
@@ -153,12 +153,13 @@ app.get('/api/download', async (req, res) => {
     try {
         const meta = await getYtMetadata(url);
 
+        // Transcript + fallback pe descriere doar dacă nu există transcript
         let transcript = await getOriginalTranscript(url);
         if (!transcript || transcript.length < 5) {
-            transcript = meta.description?.replace(/https?:\/\/\S+/g, '') || '';
+            transcript = ''; // fallback va fi doar traducerea descrierii
         }
 
-        const translated = await translateSecure(transcript);
+        const translated = await translateSecure(transcript || meta.description);
 
         console.log(`✅ Metadata ready: ${meta.title} | Duration: ${meta.duration}`);
 
@@ -168,7 +169,7 @@ app.get('/api/download', async (req, res) => {
                 title: meta.title,
                 duration: meta.duration,
                 transcript: {
-                    original: transcript || "Fără text disponibil.",
+                    original: transcript || meta.description || "Fără text disponibil.",
                     translated
                 },
                 formats: [
