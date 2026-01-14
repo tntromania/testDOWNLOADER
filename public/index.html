@@ -397,76 +397,57 @@
         const targetUrl = url || urlInput.value.trim();
         if (!targetUrl || targetUrl.length < 5) return;
 
-        if (!validatePlatformUrl(targetUrl, currentPlatform)) {
-            error.textContent = `❌ Eroare: Link-ul nu este de pe ${currentPlatform.toUpperCase()}.`;
-            error.classList.add('show');
-            return;
-        }
-
-        loading.classList.add('show');
+        // Resetăm interfața vizuală
         error.classList.remove('show');
         videoInfo.classList.remove('show');
         statusCard.classList.remove('show');
         transcriptSection.classList.remove('show');
+
+        loading.classList.add('show');
         loading.querySelector('.loading-text').textContent = "Se analizează și se traduce... ⏳";
 
         try {
+            // 1. Apelăm serverul (folosim cale relativă pentru Coolify)
             const response = await fetch(`/api/download?url=${encodeURIComponent(targetUrl)}`);
-            if (!response.ok) throw new Error("Eroare server");
+
+            if (!response.ok) throw new Error("Eroare comunicare server");
             const data = await response.json();
 
-            console.log('📦 RĂSPUNS SERVER:', data); // DEBUG
-
             if (data.status === 'ok') {
-                const title = data.data.title || "Video necunoscut";
+                const title = data.data.title || "Video Fără Titlu";
                 const duration = data.data.duration || "N/A";
 
-                // 1. AFIȘARE INFO VIDEO
+                // 2. AFIȘARE TITLU ȘI DURATĂ (Asta ai cerut)
                 videoInfo.innerHTML = `
-                    <div style="text-align:center; padding: 20px;">
-                        <h3 style="margin-bottom:10px;">🎥 ${title}</h3>
+                    <div style="text-align:center; padding: 10px;">
+                        <h3 style="margin-bottom:10px; font-size: 1.5rem;">🎥 ${title}</h3>
                         <p style="font-size: 1.1em; color: #aaa;">⏱️ Durată: ${duration} | 📦 Format: ${selectedFormat.toUpperCase()}</p>
                     </div>
                 `;
                 videoInfo.classList.add('show');
 
-                // 2. AFIȘARE TRANSCRIPT
+                // 3. Gestionare Transcript (dacă există)
                 if (data.data.transcript) {
-                    originalTranscript.textContent = data.data.transcript.original || "Fără text disponibil.";
-                    translatedTranscript.textContent = data.data.transcript.translated || "Fără traducere disponibilă.";
+                    originalTranscript.textContent = data.data.transcript.original || "Nu există text.";
+                    translatedTranscript.textContent = data.data.transcript.translated || "Se procesează...";
                     transcriptSection.classList.add('show');
                 }
 
-                // 3. ADĂUGARE ÎN ISTORIC
+                // 4. Salvare în Istoric
                 addToHistory(title, targetUrl);
 
-                // 4. ✅ FIX DOWNLOAD - Mapare corectă după format
+                // 5. DOWNLOAD AUTOMAT
                 const formats = data.data.formats;
-                console.log('📋 Formate disponibile:', formats); // DEBUG
-
                 let finalLink;
 
-                // Serverul returnează:
-                // Video: quality='360p'/'480p'/'720p'/'1080p', format='mp4'
-                // Audio: quality='192', format='mp3'
-
+                // Căutăm exact ce ne trimite serverul (mp4 sau mp3)
                 if (selectedFormat === 'mp4') {
-                    // Căutăm primul format video (oricare calitate)
-                    finalLink = formats.find(f => f.format === 'mp4' && f.hasVideo === true);
+                    finalLink = formats.find(f => f.format === 'mp4');
                 } else {
-                    // Căutăm formatul audio
                     finalLink = formats.find(f => f.format === 'mp3');
                 }
 
-                // Fallback: luăm primul format dacă nu găsim
-                if (!finalLink && formats.length > 0) {
-                    finalLink = formats[0];
-                }
-
-                console.log('🎯 Link selectat:', finalLink); // DEBUG
-
                 if (finalLink && finalLink.url) {
-                    // Auto-download
                     const a = document.createElement('a');
                     a.href = finalLink.url;
                     a.style.display = 'none';
@@ -476,14 +457,15 @@
 
                     statusCard.classList.add('show');
                 } else {
-                    throw new Error('Nu s-au găsit formate valide pentru download');
+                    throw new Error("Nu s-a putut genera link-ul de download.");
                 }
 
             } else {
-                throw new Error(data.error || 'Eroare necunoscută');
+                throw new Error(data.error || "Eroare necunoscută.");
             }
+
         } catch (err) {
-            console.error('❌ EROARE:', err);
+            console.error(err);
             error.textContent = '❌ ' + err.message;
             error.classList.add('show');
         } finally {
