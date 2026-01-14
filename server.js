@@ -12,14 +12,12 @@ app.use(cors());
 app.use(express.json());
 app.use(express.static(path.join(__dirname, 'public')));
 
-// yt-dlp instalat în Docker
 const YTDLP_PATH = 'yt-dlp';
+const COOKIES_PATH = path.join(__dirname, 'cookies.txt');
 
-/* ===============================
-   UTIL – Curățare VTT
-================================ */
+// ---------------- CLEAN VTT ----------------
 function cleanVttText(vttContent) {
-    if (!vttContent) return '';
+    if (!vttContent) return "";
     const lines = vttContent.split('\n');
     const seen = new Set();
     const out = [];
@@ -37,7 +35,7 @@ function cleanVttText(vttContent) {
         ) continue;
 
         line = line.replace(/<[^>]*>/g, '');
-        if (!seen.has(line) && line.length > 1) {
+        if (!seen.has(line)) {
             seen.add(line);
             out.push(line);
         }
@@ -45,201 +43,128 @@ function cleanVttText(vttContent) {
     return out.join(' ');
 }
 
-/* ===============================
-   METADATA – stabil
-================================ */
+// ---------------- METADATA ----------------
 function getYtMetadata(url) {
     return new Promise((resolve) => {
         const p = spawn(YTDLP_PATH, [
+            '--cookies', COOKIES_PATH,
             '--dump-json',
             '--no-warnings',
-            '--no-check-certificates',
-            '--force-ipv4',
             url
         ]);
 
-        let buffer = '';
-
-        p.stdout.on('data', d => buffer += d.toString());
-        p.stderr.on('data', d => console.error('META ERR:', d.toString()));
-
+        let buf = '';
+        p.stdout.on('data', d => buf += d);
         p.on('close', () => {
             try {
-                const j = JSON.parse(buffer);
-                resolve({
-                    title: j.title || 'YouTube Video',
-                    description: j.description || '',
-                    duration_string:
-                        j.duration_string ||
-                        (j.duration
-                            ? `${Math.floor(j.duration / 60)}:${String(j.duration % 60).padStart(2, '0')}`
-                            : 'N/A')
-                });
+                resolve(JSON.parse(buf));
             } catch {
-                resolve({
-                    title: 'YouTube Video',
-                    description: '',
-                    duration_string: 'N/A'
-                });
+                resolve({ title: 'YouTube Video', description: '', duration_string: 'N/A' });
             }
         });
     });
 }
 
-/* ===============================
-   TRANSCRIPT – NU MAI DĂ RATEURI
-================================ */
+// ---------------- TRANSCRIPT ----------------
 function getOriginalTranscript(url) {
     return new Promise((resolve) => {
         const id = Date.now();
-        const base = path.join(__dirname, `subs_${id}`);
+        const out = `trans_${id}`;
 
         const p = spawn(YTDLP_PATH, [
+            '--cookies', COOKIES_PATH,
             '--skip-download',
             '--write-auto-sub',
-            '--write-sub',
-            '--sub-lang', 'en,ro,.*',
-            '--sub-format', 'vtt',
+            '--sub-lang', 'en',
             '--convert-subs', 'vtt',
-            '-o', base,
-            '--no-warnings',
-            '--no-check-certificates',
+            '-o', out,
             url
         ]);
 
-        p.stderr.on('data', d => console.error('SUB ERR:', d.toString()));
-
         p.on('close', () => {
-            let text = '';
+            const file = `${out}.en.vtt`;
+            if (!fs.existsSync(file)) return resolve(null);
 
-            try {
-                const files = fs.readdirSync(__dirname)
-                    .filter(f => f.startsWith(`subs_${id}`) && f.endsWith('.vtt'));
-
-                for (const f of files) {
-                    const content = fs.readFileSync(path.join(__dirname, f), 'utf8');
-                    text += ' ' + cleanVttText(content);
-                    fs.unlinkSync(path.join(__dirname, f));
-                }
-            } catch (e) {
-                console.error('SUB READ ERR:', e.message);
-            }
-
-            resolve(text.trim() || null);
+            const text = cleanVttText(fs.readFileSync(file, 'utf8'));
+            fs.unlinkSync(file);
+            resolve(text);
         });
     });
 }
 
-/* ===============================
-   TRADUCERE
-================================ */
+// ---------------- TRANSLATE ----------------
 async function translateSecure(text) {
-    if (!text || text.length < 5) return 'Fără traducere disponibilă.';
+    if (!text || text.length < 10) return "Nu există text suficient.";
     try {
         const res = await translate(text.slice(0, 4500), { to: 'ro' });
         return res.text;
     } catch {
-        return 'Traducere indisponibilă.';
+        return "Traducere indisponibilă.";
     }
 }
 
-/* ===============================
-   API DOWNLOAD
-================================ */
+// ---------------- API ----------------
 app.get('/api/download', async (req, res) => {
-    const videoUrl = req.query.url;
-    if (!videoUrl) return res.status(400).json({ error: 'URL lipsă' });
-
-    console.log('[START]', videoUrl);
+    const url = req.query.url;
+    if (!url) return res.status(400).json({ error: 'URL lipsă' });
 
     try {
-        // A. Metadata
-        const metadata = await getYtMetadata(videoUrl);
+        const meta = await getYtMetadata(url);
+        let transcript = await getOriginalTranscript(url);
 
-        // B. Transcript
-        let originalText = await getOriginalTranscript(videoUrl);
-
-        // Fallback: description
-        if (!originalText) {
-            originalText = (metadata.description || '').replace(/https?:\/\/\S+/g, '');
+        if (!transcript) {
+            transcript = meta.description?.replace(/https?:\/\/\S+/g, '') || '';
         }
 
-        // C. Traducere
-        let translatedText = 'Fără traducere disponibilă.';
-        if (originalText && originalText.length > 5) {
-            translatedText = await translateSecure(originalText);
-        }
+        const translated = await translateSecure(transcript);
 
-        // D. Formate
         res.json({
             status: 'ok',
             data: {
-                title: metadata.title,
-                duration: metadata.duration_string,
+                title: meta.title,
+                duration: meta.duration_string,
+                transcript: {
+                    original: transcript,
+                    translated
+                },
                 formats: [
                     {
                         quality: '1080p',
                         format: 'mp4',
-                        url: `/api/stream?url=${encodeURIComponent(videoUrl)}&type=video`,
-                        hasVideo: true,
-                        hasAudio: true
+                        url: `/api/stream?url=${encodeURIComponent(url)}&type=video`
                     },
                     {
                         quality: '192kbps',
                         format: 'mp3',
-                        url: `/api/stream?url=${encodeURIComponent(videoUrl)}&type=audio`,
-                        hasVideo: false,
-                        hasAudio: true
+                        url: `/api/stream?url=${encodeURIComponent(url)}&type=audio`
                     }
-                ],
-                transcript: {
-                    original: originalText || 'Nu s-a găsit text.',
-                    translated: translatedText
-                }
+                ]
             }
         });
 
-        console.log('[SUCCESS]', metadata.title);
-
     } catch (e) {
-        console.error('SERVER ERR:', e);
-        res.status(500).json({ error: 'Eroare la procesare.' });
+        res.status(500).json({ error: 'Eroare server' });
     }
 });
 
-/* ===============================
-   STREAM VIDEO / AUDIO
-================================ */
+// ---------------- STREAM ----------------
 app.get('/api/stream', (req, res) => {
     const { url, type } = req.query;
-    const isAudio = type === 'audio';
+    const audio = type === 'audio';
 
-    res.setHeader(
-        'Content-Disposition',
-        `attachment; filename="${isAudio ? 'audio.mp3' : 'video.mp4'}"`
-    );
-    res.setHeader('Content-Type', isAudio ? 'audio/mpeg' : 'video/mp4');
+    res.setHeader('Content-Type', audio ? 'audio/mpeg' : 'video/mp4');
 
     const p = spawn(YTDLP_PATH, [
+        '--cookies', COOKIES_PATH,
+        '-f', audio ? 'bestaudio' : 'best',
         '-o', '-',
-        '--no-warnings',
-        '--no-check-certificates',
-        '--force-ipv4',
-        '-f', isAudio ? 'bestaudio' : 'best',
         url
     ]);
 
-    p.stderr.on('data', d => console.error('STREAM ERR:', d.toString()));
     p.stdout.pipe(res);
 });
 
-/* ===============================
-   FRONTEND FALLBACK
-================================ */
-app.get('*', (_, res) => {
-    res.sendFile(path.join(__dirname, 'public', 'index.html'));
-});
-
+// ---------------- START ----------------
 app.listen(PORT, '0.0.0.0', () => {
     console.log(`🚀 Server pornit pe port ${PORT}`);
 });

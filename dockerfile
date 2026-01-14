@@ -20,6 +20,8 @@ RUN curl -L https://github.com/yt-dlp/yt-dlp/releases/latest/download/yt-dlp \
     && yt-dlp --version
 
 WORKDIR /app
+COPY cookies.txt /app/cookies.txt
+
 
 # =========================
 # NODE DEPENDENCIES
