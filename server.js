@@ -4,14 +4,15 @@ const { spawn } = require('child_process');
 const path = require('path');
 const fs = require('fs');
 const { translate } = require('@vitalets/google-translate-api');
+
 const app = express();
-const PORT = 3003; // Portul pentru server
+const PORT = 3003; // Portul pentru Coolify
 
 app.use(cors());
 app.use(express.json());
 app.use(express.static(path.join(__dirname, 'public')));
 
-// MODIFICARE CRITICĂ: Pe Linux folosim direct comanda 'yt-dlp', fără cale fixă sau .exe
+// --- MODIFICARE 1: Fără .exe pentru Linux ---
 const YTDLP_PATH = 'yt-dlp'; 
 
 // --- 1. Funcție: CURĂȚARE TEXT ---
@@ -49,7 +50,7 @@ async function getOriginalTranscript(url) {
             '--convert-subs', 'vtt',
             '--output', outputTemplate,
             '--no-check-certificates',
-            '--no-warnings', // Important: ascundem warning-urile să nu strice logurile
+            '--no-warnings',
             url
         ];
 
@@ -80,7 +81,7 @@ async function translateSecure(text) {
     } catch (err) { return "Traducere momentan indisponibilă."; }
 }
 
-// --- 4. Funcție: Metadata (LOGICA VECHE CARE MERGEA) ---
+// --- 4. Funcție: Metadata (Rapidă) ---
 function getYtMetadata(url) {
     return new Promise((resolve) => {
         const process = spawn(YTDLP_PATH, ['--dump-json', '--no-warnings', '--no-check-certificates', url]);
@@ -90,7 +91,8 @@ function getYtMetadata(url) {
             try { 
                 resolve(JSON.parse(buffer)); 
             } catch (e) { 
-                resolve({ title: "YouTube Video", description: "", duration_string: "N/A" }); 
+                // Dacă eșuează JSON, dăm valori implicite ca să nu crape HTML-ul
+                resolve({ title: "Video (Titlu Indisponibil)", description: "", duration_string: "N/A" }); 
             } 
         });
     });
@@ -109,7 +111,7 @@ app.get('/api/download', async (req, res) => {
         let originalText = await getOriginalTranscript(videoUrl);
         if (!originalText) {
             originalText = metadata.description || "Nu s-a găsit text.";
-            originalText = originalText.replace(/https?:\/\/\S+/g, '');
+            originalText = originalText.replace(/https?:\/\/\S+/g, ''); // Scoatem linkuri
         }
 
         // C. Traducem
@@ -118,12 +120,11 @@ app.get('/api/download', async (req, res) => {
             translatedText = await translateSecure(originalText);
         }
 
-        // D. Pregătim răspunsul
-        // AICI AM PUS FORMATUL SĂ SE POTRIVEASCĂ CU HTML-UL TĂU
-        // HTML-ul caută formats.find(f => f.quality === 'MP4') pentru auto-click
+        // D. Pregătim răspunsul PENTRU HTML-ul TĂU
+        // HTML-ul tău caută exact "MP4" și "MP3" în câmpul "quality"
         const formats = [
             {
-                quality: 'MP4', // String exact pentru HTML-ul tău
+                quality: 'MP4', 
                 url: `/api/stream?url=${encodeURIComponent(videoUrl)}&type=video`,
                 hasAudio: true, hasVideo: true
             },
@@ -134,7 +135,7 @@ app.get('/api/download', async (req, res) => {
             }
         ];
 
-        // Trimitem datele în structura așteptată de HTML
+        // Structura JSON exact cum o vrea HTML-ul tău "Universal Pro"
         res.json({
             status: 'ok',
             data: {
@@ -162,6 +163,7 @@ app.get('/api/stream', (req, res) => {
     res.setHeader('Content-Disposition', `attachment; filename="${isAudio ? 'audio.mp3' : 'video.mp4'}"`);
     res.setHeader('Content-Type', isAudio ? 'audio/mpeg' : 'video/mp4');
 
+    // Comanda pentru streaming direct
     const args = [
         '-o', '-', 
         '--no-warnings', 
@@ -175,9 +177,9 @@ app.get('/api/stream', (req, res) => {
     process.stdout.pipe(res);
 });
 
-// Servește HTML-ul principal
+// Ruta Fallback pentru Single Page Application
 app.get('*', (req, res) => res.sendFile(path.join(__dirname, 'public', 'index.html')));
 
 app.listen(PORT, '0.0.0.0', () => {
-    console.log(`🚀 Server PRO (Linux Version) pornit pe ${PORT}`);
+    console.log(`🚀 Server Universal Pro pornit pe ${PORT}`);
 });
