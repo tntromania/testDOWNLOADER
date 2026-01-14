@@ -7,20 +7,18 @@ const axios = require('axios');
 const { translate } = require('@vitalets/google-translate-api'); 
 
 const app = express();
-const PORT = 3003; // Portul pentru Coolify
+const PORT = 3003;
 
 app.use(cors());
 app.use(express.json());
-app.use(express.static(path.join(__dirname, 'public')));
 
-// --- CHEIA TA OPENAI (Păstrată 1:1 cum ai cerut) ---
+// --- CHEIA OPENAI DIN VARIABILA DE MEDIU ---
 const OPENAI_API_KEY = process.env.OPENAI_API_KEY;
 if (!OPENAI_API_KEY) {
-    console.warn(":warning: OPENAI_API_KEY nu este setată în variabilele de mediu!");
+    console.warn("⚠️ OPENAI_API_KEY nu este setată în variabilele de mediu!");
 }
 
-// --- MODIFICARE SERVER: Fără .exe pentru Linux ---
-const YTDLP_PATH = 'yt-dlp';
+const YTDLP_PATH = path.join(__dirname, 'yt-dlp.exe');
 
 // --- DETECTARE PLATFORMĂ ---
 function detectPlatform(url) {
@@ -61,13 +59,15 @@ async function translateWithGoogle(text) {
     }
 }
 
-// --- 3. TRADUCERE GPT CU STREAMING (MATRIX STYLE) ---
+// --- 3. TRADUCERE GPT CU STREAMING ---
 async function translateWithGPT(text) {
     if (!text || text.length < 5) return "Nu există suficient text.";
     const textToTranslate = text.substring(0, 3000);
 
     console.log("\n🤖 GPT-4o-mini începe traducerea:");
     console.log("------------------------------------------------");
+
+    if (!OPENAI_API_KEY) return await translateWithGoogle(text);
 
     try {
         const response = await axios.post('https://api.openai.com/v1/chat/completions', {
@@ -160,7 +160,7 @@ function getYtMetadata(url) {
         let buffer = '';
         process.stdout.on('data', d => buffer += d);
         process.on('close', () => {
-            try { resolve(JSON.parse(buffer)); } catch (e) { resolve({ title: "Video", description: "" }); }
+            try { resolve(JSON.parse(buffer)); } catch (e) { resolve({ title: "Video", description: "", duration_string: "N/A" }); }
         });
     });
 }
@@ -177,7 +177,6 @@ app.get('/api/download', async (req, res) => {
         const metadata = await getYtMetadata(videoUrl);
         let transcriptData = null;
 
-        // PROCESĂM TRANSCRIPTUL DOAR PENTRU YOUTUBE
         if (platform === 'youtube') {
             console.log("📝 YouTube detectat - extrag transcript...");
             let originalText = await getOriginalTranscript(videoUrl);
@@ -187,7 +186,6 @@ app.get('/api/download', async (req, res) => {
                 originalText = metadata.description || "Niciun text găsit.";
             }
 
-            // Traducere cu GPT
             const translatedText = await translateWithGPT(originalText);
             
             transcriptData = {
@@ -198,23 +196,9 @@ app.get('/api/download', async (req, res) => {
             console.log(`⏩ ${platform} - skip transcript (doar download)`);
         }
 
-        // --- FORMAT MATRICE PENTRU FRONTEND-UL TĂU ---
-        // Aici am pus path-ul relativ `/api/stream` cum ai cerut
         const formats = [
-            { 
-                quality: 'MP4', 
-                format: 'mp4',
-                hasVideo: true,
-                hasAudio: true,
-                url: `/api/stream?type=video&url=${encodeURIComponent(videoUrl)}` 
-            },
-            { 
-                quality: 'MP3', 
-                format: 'mp3',
-                hasVideo: false,
-                hasAudio: true,
-                url: `/api/stream?type=audio&url=${encodeURIComponent(videoUrl)}` 
-            }
+            { quality: 'Video HD (MP4)', url: `/api/stream?type=video&url=${encodeURIComponent(videoUrl)}` },
+            { quality: 'Audio Only (MP3)', url: `/api/stream?type=audio&url=${encodeURIComponent(videoUrl)}` }
         ];
 
         res.json({
@@ -223,7 +207,7 @@ app.get('/api/download', async (req, res) => {
                 title: metadata.title,
                 duration: metadata.duration_string,
                 formats: formats,
-                transcript: transcriptData // Null pentru non-YouTube
+                transcript: transcriptData
             }
         });
 
@@ -236,15 +220,11 @@ app.get('/api/download', async (req, res) => {
 app.get('/api/stream', (req, res) => {
     const { url, type } = req.query;
     res.setHeader('Content-Disposition', `attachment; filename="${type === 'audio' ? 'audio.mp3' : 'video.mp4'}"`);
-    // Folosim YTDLP_PATH setat pentru Linux
     const args = ['-o', '-', '--no-check-certificates', '--force-ipv4', '-f', type === 'audio' ? 'bestaudio' : 'best', url];
     const process = spawn(YTDLP_PATH, args);
     process.stdout.pipe(res);
 });
 
-// Fallback pentru index.html
-app.get('*', (req, res) => res.sendFile(path.join(__dirname, 'public', 'index.html')));
-
-app.listen(PORT, '0.0.0.0', () => {
-    console.log(`📥 Downloader Pro (Smart GPT) pornit pe ${PORT}`);
+app.listen(PORT, () => {
+    console.log(`📥 Downloader Pro (Smart Transcript) pornit pe ${PORT}`);
 });
