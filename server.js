@@ -52,12 +52,13 @@ function cleanVttText(vttContent) {
 function formatDuration(sec) {
     if (!sec) return 'N/A';
     const m = Math.floor(sec / 60);
-    const s = sec % 60;
+    const s = Math.floor(sec % 60);
     return `${m}:${String(s).padStart(2, '0')}`;
 }
 
 function getYtMetadata(url) {
-    return new Promise((resolve) => {
+    return new Promise((resolve, reject) => {
+        console.log(`🔍 Fetching metadata for: ${url}`);
         const p = spawn(YTDLP_PATH, [
             '--cookies', COOKIES_PATH,
             '--dump-single-json',
@@ -67,21 +68,18 @@ function getYtMetadata(url) {
 
         let buf = '';
         p.stdout.on('data', d => buf += d);
+        p.stderr.on('data', d => console.log('yt-dlp stderr:', d.toString()));
 
         p.on('close', () => {
             try {
                 const json = JSON.parse(buf);
-                resolve({
-                    title: json.title || 'YouTube Video',
-                    description: json.description || '',
-                    duration_string: json.duration_string || formatDuration(json.duration)
-                });
-            } catch {
-                resolve({
-                    title: 'YouTube Video',
-                    description: '',
-                    duration_string: 'N/A'
-                });
+                const title = json.title || 'YouTube Video';
+                const description = json.description || '';
+                const duration = formatDuration(json.duration);
+                resolve({ title, description, duration });
+            } catch (err) {
+                console.error('❌ Metadata parsing error:', err);
+                resolve({ title: 'YouTube Video', description: '', duration: 'N/A' });
             }
         });
     });
@@ -94,6 +92,7 @@ function getOriginalTranscript(url) {
     return new Promise((resolve) => {
         const id = Date.now();
         const out = `trans_${id}`;
+        console.log(`📝 Generating transcript for: ${url}`);
 
         const p = spawn(YTDLP_PATH, [
             '--cookies', COOKIES_PATH,
@@ -105,6 +104,8 @@ function getOriginalTranscript(url) {
             '-o', out,
             url
         ]);
+
+        p.stderr.on('data', d => console.log('yt-dlp stderr:', d.toString()));
 
         p.on('close', () => {
             const possibleFiles = [
@@ -147,22 +148,25 @@ app.get('/api/download', async (req, res) => {
     const url = req.query.url;
     if (!url) return res.status(400).json({ error: 'URL lipsă' });
 
+    console.log(`📥 New request: ${url}`);
+
     try {
         const meta = await getYtMetadata(url);
 
         let transcript = await getOriginalTranscript(url);
-
         if (!transcript || transcript.length < 5) {
             transcript = meta.description?.replace(/https?:\/\/\S+/g, '') || '';
         }
 
         const translated = await translateSecure(transcript);
 
+        console.log(`✅ Metadata ready: ${meta.title} | Duration: ${meta.duration}`);
+
         res.json({
             status: 'ok',
             data: {
                 title: meta.title,
-                duration: meta.duration_string,
+                duration: meta.duration,
                 transcript: {
                     original: transcript || "Fără text disponibil.",
                     translated
@@ -183,7 +187,7 @@ app.get('/api/download', async (req, res) => {
         });
 
     } catch (err) {
-        console.error(err);
+        console.error('❌ Error processing request:', err);
         res.status(500).json({ error: 'Eroare server' });
     }
 });
@@ -194,6 +198,8 @@ app.get('/api/download', async (req, res) => {
 app.get('/api/stream', (req, res) => {
     const { url, type } = req.query;
     const isAudio = type === 'audio';
+
+    console.log(`📦 Streaming ${type} for: ${url}`);
 
     res.setHeader(
         'Content-Disposition',
@@ -210,10 +216,12 @@ app.get('/api/stream', (req, res) => {
 
     const p = spawn(YTDLP_PATH, args);
     p.stdout.pipe(res);
+
+    p.stderr.on('data', d => console.log('yt-dlp stderr:', d.toString()));
 });
 
 /* =========================
-   START
+   START SERVER
 ========================= */
 app.listen(PORT, '0.0.0.0', () => {
     console.log(`🚀 Server pornit pe port ${PORT}`);
