@@ -4,26 +4,15 @@ const { spawn } = require('child_process');
 const path = require('path');
 const fs = require('fs');
 const { translate } = require('@vitalets/google-translate-api');
-
 const app = express();
-const PORT = 3003;
+const PORT = 3003; // Portul pentru server
 
 app.use(cors());
 app.use(express.json());
 app.use(express.static(path.join(__dirname, 'public')));
 
-// MODIFICARE: Pe Linux folosim direct comanda, fără .exe
-const YTDLP_PATH = 'yt-dlp';
-const COOKIES_PATH = path.join(__dirname, 'cookies.txt');
-
-// --- 0. INITIALIZARE COOKIES (Opțional, dar bun să fie acolo) ---
-if (process.env.YOUTUBE_COOKIES) {
-    try {
-        const cookiesContent = process.env.YOUTUBE_COOKIES.replace(/^"|"$/g, '');
-        fs.writeFileSync(COOKIES_PATH, cookiesContent, 'utf8');
-        console.log("✅ Cookies încărcate (dacă e nevoie)");
-    } catch (e) { console.error("Info Cookies:", e.message); }
-}
+// MODIFICARE CRITICĂ: Pe Linux folosim direct comanda 'yt-dlp', fără cale fixă sau .exe
+const YTDLP_PATH = 'yt-dlp'; 
 
 // --- 1. Funcție: CURĂȚARE TEXT ---
 function cleanVttText(vttContent) {
@@ -34,6 +23,7 @@ function cleanVttText(vttContent) {
 
     lines.forEach(line => {
         line = line.trim();
+        // Filtre pentru linii inutile
         if (!line || line.startsWith('WEBVTT') || line.includes('-->') || /^\d+$/.test(line) || 
             line.startsWith('Kind:') || line.startsWith('Language:') || line.startsWith('Style:')) return;
         
@@ -50,18 +40,21 @@ function cleanVttText(vttContent) {
 async function getOriginalTranscript(url) {
     const uniqueId = Date.now();
     const outputTemplate = path.join(__dirname, `trans_${uniqueId}`);
-    
-    // Adăugăm cookies doar dacă fișierul există
-    let args = [
-        '--skip-download', '--write-sub', '--write-auto-sub',
-        '--sub-lang', 'en', '--convert-subs', 'vtt',
-        '--output', outputTemplate, '--no-check-certificates', '--no-warnings',
-        url
-    ];
-    if (fs.existsSync(COOKIES_PATH)) args.push('--cookies', COOKIES_PATH);
 
     return new Promise((resolve) => {
+        const args = [
+            '--skip-download',
+            '--write-sub', '--write-auto-sub',
+            '--sub-lang', 'en',
+            '--convert-subs', 'vtt',
+            '--output', outputTemplate,
+            '--no-check-certificates',
+            '--no-warnings', // Important: ascundem warning-urile să nu strice logurile
+            url
+        ];
+
         const process = spawn(YTDLP_PATH, args);
+
         process.on('close', () => {
             const possibleFiles = [`${outputTemplate}.en.vtt`, `${outputTemplate}.en-orig.vtt`];
             let foundFile = possibleFiles.find(f => fs.existsSync(f));
@@ -84,25 +77,20 @@ async function translateSecure(text) {
     try {
         const res = await translate(text.substring(0, 4500), { to: 'ro' });
         return res.text;
-    } catch (err) { return "Traducere indisponibilă."; }
+    } catch (err) { return "Traducere momentan indisponibilă."; }
 }
 
-// --- 4. Funcție: Metadata (LOGICA VECHE CARE ÎȚI PLĂCEA) ---
+// --- 4. Funcție: Metadata (LOGICA VECHE CARE MERGEA) ---
 function getYtMetadata(url) {
     return new Promise((resolve) => {
-        let args = ['--dump-json', '--no-warnings', '--no-check-certificates', url];
-        if (fs.existsSync(COOKIES_PATH)) args.push('--cookies', COOKIES_PATH);
-
-        const process = spawn(YTDLP_PATH, args);
+        const process = spawn(YTDLP_PATH, ['--dump-json', '--no-warnings', '--no-check-certificates', url]);
         let buffer = '';
-        
         process.stdout.on('data', d => buffer += d);
         process.on('close', () => { 
             try { 
                 resolve(JSON.parse(buffer)); 
             } catch (e) { 
-                // Fallback simplu
-                resolve({ title: "Video Fără Titlu", description: "", duration_string: "N/A" }); 
+                resolve({ title: "YouTube Video", description: "", duration_string: "N/A" }); 
             } 
         });
     });
@@ -130,10 +118,12 @@ app.get('/api/download', async (req, res) => {
             translatedText = await translateSecure(originalText);
         }
 
-        // D. Pregătim răspunsul (Link-uri relative pentru Server)
+        // D. Pregătim răspunsul
+        // AICI AM PUS FORMATUL SĂ SE POTRIVEASCĂ CU HTML-UL TĂU
+        // HTML-ul caută formats.find(f => f.quality === 'MP4') pentru auto-click
         const formats = [
             {
-                quality: 'MP4', // Folosim string simplu ca să se potrivească cu frontend-ul
+                quality: 'MP4', // String exact pentru HTML-ul tău
                 url: `/api/stream?url=${encodeURIComponent(videoUrl)}&type=video`,
                 hasAudio: true, hasVideo: true
             },
@@ -144,12 +134,12 @@ app.get('/api/download', async (req, res) => {
             }
         ];
 
-        // Trimitem structura pe care o așteaptă frontend-ul tău
+        // Trimitem datele în structura așteptată de HTML
         res.json({
             status: 'ok',
             data: {
                 title: metadata.title,
-                duration: metadata.duration_string, // Asta e cheia pentru durată!
+                duration: metadata.duration_string,
                 formats: formats,
                 transcript: {
                     original: originalText,
@@ -172,18 +162,22 @@ app.get('/api/stream', (req, res) => {
     res.setHeader('Content-Disposition', `attachment; filename="${isAudio ? 'audio.mp3' : 'video.mp4'}"`);
     res.setHeader('Content-Type', isAudio ? 'audio/mpeg' : 'video/mp4');
 
-    let args = ['-o', '-', '--no-warnings', '--no-check-certificates', '--force-ipv4', '-f', isAudio ? 'bestaudio' : 'best', url];
-    if (fs.existsSync(COOKIES_PATH)) args.push('--cookies', COOKIES_PATH);
+    const args = [
+        '-o', '-', 
+        '--no-warnings', 
+        '--no-check-certificates', 
+        '--force-ipv4', 
+        '-f', isAudio ? 'bestaudio' : 'best', 
+        url
+    ];
 
     const process = spawn(YTDLP_PATH, args);
     process.stdout.pipe(res);
 });
 
-// Ruta Fallback
-app.get('*', (req, res) => {
-    res.sendFile(path.join(__dirname, 'public', 'index.html'));
-});
+// Servește HTML-ul principal
+app.get('*', (req, res) => res.sendFile(path.join(__dirname, 'public', 'index.html')));
 
 app.listen(PORT, '0.0.0.0', () => {
-    console.log(`🚀 Server Downloader pornit pe portul ${PORT}`);
+    console.log(`🚀 Server PRO (Linux Version) pornit pe ${PORT}`);
 });
