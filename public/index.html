@@ -306,7 +306,6 @@
             </div>
 
             <div class="error" id="error"></div>
-
             <div class="video-info" id="videoInfo"></div>
 
             <div class="status-card" id="statusCard">
@@ -341,8 +340,7 @@
                 <h3>📜 Recent Downloads</h3>
                 <button class="clear-btn" onclick="clearHistory()">Clear History</button>
             </div>
-            <ul class="history-list" id="historyList">
-            </ul>
+            <ul class="history-list" id="historyList"></ul>
         </div>
     </div>
 </div>
@@ -354,7 +352,6 @@
     let currentPlatform = 'youtube';
     let debounceTimer;
 
-    // Elemente UI
     const urlInput = document.getElementById('urlInput');
     const loading = document.getElementById('loading');
     const error = document.getElementById('error');
@@ -366,7 +363,6 @@
     const historySection = document.getElementById('historySection');
     const historyList = document.getElementById('historyList');
 
-    // --- FIX ISTORIC ---
     function loadHistory() { renderHistory(); }
     loadHistory();
 
@@ -419,12 +415,13 @@
             if (!response.ok) throw new Error("Eroare server");
             const data = await response.json();
 
+            console.log('📦 RĂSPUNS SERVER:', data); // DEBUG
+
             if (data.status === 'ok') {
-                // FIX: Mapare corectă date
-                const title = data.data.title || "Video";
+                const title = data.data.title || "Video necunoscut";
                 const duration = data.data.duration || "N/A";
 
-                // 1. INFO CARD
+                // 1. AFIȘARE INFO VIDEO
                 videoInfo.innerHTML = `
                     <div style="text-align:center; padding: 20px;">
                         <h3 style="margin-bottom:10px;">🎥 ${title}</h3>
@@ -432,35 +429,61 @@
                     </div>
                 `;
                 videoInfo.classList.add('show');
-                statusCard.classList.add('show');
 
-                // 2. TRANSCRIPT (cu fallback)
+                // 2. AFIȘARE TRANSCRIPT
                 if (data.data.transcript) {
-                    originalTranscript.textContent = data.data.transcript.original || "Fără text.";
-                    translatedTranscript.textContent = data.data.transcript.translated || "Fără traducere.";
+                    originalTranscript.textContent = data.data.transcript.original || "Fără text disponibil.";
+                    translatedTranscript.textContent = data.data.transcript.translated || "Fără traducere disponibilă.";
                     transcriptSection.classList.add('show');
                 }
 
-                // 3. ISTORIC
+                // 3. ADĂUGARE ÎN ISTORIC
                 addToHistory(title, targetUrl);
 
-                // 4. DOWNLOAD INSTANT (Auto-Click)
+                // 4. ✅ FIX DOWNLOAD - Mapare corectă după format
                 const formats = data.data.formats;
-                let finalLink = (selectedFormat === 'mp4')
-                    ? formats.find(f => f.quality === 'MP4')
-                    : formats.find(f => f.quality === 'MP3');
+                console.log('📋 Formate disponibile:', formats); // DEBUG
 
-                if (!finalLink) finalLink = formats[0];
+                let finalLink;
 
-                const a = document.createElement('a');
-                a.href = finalLink.url;
-                a.style.display = 'none';
-                document.body.appendChild(a);
-                a.click();
-                setTimeout(() => document.body.removeChild(a), 100);
+                // Serverul returnează:
+                // Video: quality='360p'/'480p'/'720p'/'1080p', format='mp4'
+                // Audio: quality='192', format='mp3'
 
-            } else { throw new Error(data.error); }
+                if (selectedFormat === 'mp4') {
+                    // Căutăm primul format video (oricare calitate)
+                    finalLink = formats.find(f => f.format === 'mp4' && f.hasVideo === true);
+                } else {
+                    // Căutăm formatul audio
+                    finalLink = formats.find(f => f.format === 'mp3');
+                }
+
+                // Fallback: luăm primul format dacă nu găsim
+                if (!finalLink && formats.length > 0) {
+                    finalLink = formats[0];
+                }
+
+                console.log('🎯 Link selectat:', finalLink); // DEBUG
+
+                if (finalLink && finalLink.url) {
+                    // Auto-download
+                    const a = document.createElement('a');
+                    a.href = finalLink.url;
+                    a.style.display = 'none';
+                    document.body.appendChild(a);
+                    a.click();
+                    setTimeout(() => document.body.removeChild(a), 100);
+
+                    statusCard.classList.add('show');
+                } else {
+                    throw new Error('Nu s-au găsit formate valide pentru download');
+                }
+
+            } else {
+                throw new Error(data.error || 'Eroare necunoscută');
+            }
         } catch (err) {
+            console.error('❌ EROARE:', err);
             error.textContent = '❌ ' + err.message;
             error.classList.add('show');
         } finally {
@@ -479,7 +502,7 @@
     function copyTranscript(type) {
         const id = type === 'original' ? 'originalTranscript' : 'translatedTranscript';
         const text = document.getElementById(id).textContent;
-        navigator.clipboard.writeText(text).then(() => alert("Copiat!"));
+        navigator.clipboard.writeText(text).then(() => alert("✅ Copiat!"));
     }
 
     function downloadTxt(type) {
@@ -503,7 +526,10 @@
 
     function renderHistory() {
         let history = JSON.parse(localStorage.getItem('dl_history') || '[]');
-        if (history.length === 0) { historySection.style.display = 'none'; return; }
+        if (history.length === 0) {
+            historySection.style.display = 'none';
+            return;
+        }
         historySection.style.display = 'block';
         historyList.innerHTML = history.map(item => `
             <li class="history-item" onclick="urlInput.value='${item.url}'; processVideo('${item.url}')">
