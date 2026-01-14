@@ -13,7 +13,7 @@ const PORT = 3003;
 app.use(cors());
 app.use(express.json());
 
-// SERVIRE FIȘIERE STATICE: Această linie este vitală pentru a vedea index.html
+// SERVIRE FIȘIERE STATICE
 app.use(express.static(path.join(__dirname, 'public')));
 
 // Cheia se ia din variabilele de mediu setate în Coolify
@@ -38,7 +38,9 @@ function cleanVttText(vttContent) {
 
     lines.forEach(line => {
         line = line.trim();
-        if (!line || line.includes('-->') || /^\d+$/.test(line) || line.startsWith('WEBVTT')) return;
+        // Eliminăm timestamp-uri, header-uri și linii goale
+        if (!line || line.includes('-->') || /^\d+$/.test(line) || line.startsWith('WEBVTT') || line.startsWith('NOTE')) return;
+        // Eliminăm tag-uri HTML <c> etc
         line = line.replace(/<[^>]*>/g, '');
         if (!seenLines.has(line) && line.length > 1) {
             seenLines.add(line);
@@ -63,7 +65,7 @@ async function translateWithGoogle(text) {
 // --- 4. TRADUCERE GPT ---
 async function translateWithGPT(text) {
     if (!text || text.length < 5) return "Nu există suficient text.";
-    const textToTranslate = text.substring(0, 3500);
+    const textToTranslate = text.substring(0, 4000); // Mărim limita puțin
 
     console.log("\n🤖 GPT-4o-mini începe traducerea...");
 
@@ -71,7 +73,7 @@ async function translateWithGPT(text) {
         const response = await axios.post('https://api.openai.com/v1/chat/completions', {
             model: "gpt-4o-mini",
             messages: [
-                { "role": "system", "content": "Traduce în Română. Păstrează sensul dar fă-l să sune natural. Nu adăuga comentarii meta." },
+                { "role": "system", "content": "Ești un traducător profesionist. Tradu textul următor în limba Română. Păstrează sensul exact, dar fă-l să sune natural. Nu adăuga note explicative." },
                 { "role": "user", "content": textToTranslate }
             ],
             temperature: 0.3
@@ -89,47 +91,71 @@ async function translateWithGPT(text) {
     }
 }
 
-// --- 5. LOGICA EXTRAGERE TRANSCRIPT ---
+// --- 5. LOGICA EXTRAGERE TRANSCRIPT (REPARATĂ) ---
 async function getOriginalTranscript(url) {
     const uniqueId = Date.now();
-    const outputTemplate = path.join(__dirname, `trans_${uniqueId}`);
+    // Folosim un prefix clar pentru a găsi fișierul mai ușor
+    const outputBase = path.join(__dirname, `temp_${uniqueId}`);
 
     return new Promise((resolve) => {
         const subProcess = spawn(YTDLP_PATH, [
             '--skip-download',
             '--write-auto-sub',
-            '--sub-lang', 'en',
+            '--write-sub',
             '--convert-subs', 'vtt',
-            '--output', outputTemplate,
+            '--output', outputBase, // yt-dlp va adăuga sufixe gen .en.vtt sau .ro.vtt
             '--no-check-certificates',
+            '--no-warnings', // IMPORTANT: Ascunde erorile care strică procesul
             url
         ]);
 
         subProcess.on('close', () => {
-            const file = `${outputTemplate}.en.vtt`;
-            if (fs.existsSync(file)) {
-                const content = fs.readFileSync(file, 'utf8');
-                const clean = cleanVttText(content);
-                try { fs.unlinkSync(file); } catch(e){}
-                resolve(clean);
+            // Căutăm orice fișier care începe cu temp_{uniqueId} și se termină în .vtt
+            const dir = __dirname;
+            const files = fs.readdirSync(dir);
+            const vttFile = files.find(f => f.startsWith(`temp_${uniqueId}`) && f.endsWith('.vtt'));
+
+            if (vttFile) {
+                const fullPath = path.join(dir, vttFile);
+                try {
+                    const content = fs.readFileSync(fullPath, 'utf8');
+                    const clean = cleanVttText(content);
+                    fs.unlinkSync(fullPath); // Ștergem fișierul temporar
+                    resolve(clean);
+                } catch(e) {
+                    console.error("Eroare citire VTT:", e);
+                    resolve(null);
+                }
             } else {
+                console.log("❌ Nu s-a găsit niciun fișier .vtt generat.");
                 resolve(null);
             }
         });
     });
 }
 
-// --- 6. METADATE VIDEO ---
+// --- 6. METADATE VIDEO (REPARATĂ) ---
 function getYtMetadata(url) {
     return new Promise((resolve) => {
-        const metaProcess = spawn(YTDLP_PATH, ['--dump-json', '--no-check-certificates', url]);
+        // IMPORTANT: Adăugat --no-warnings pentru a primi JSON curat
+        const metaProcess = spawn(YTDLP_PATH, [
+            '--dump-json', 
+            '--no-warnings', 
+            '--no-check-certificates', 
+            url
+        ]);
+        
         let buffer = '';
         metaProcess.stdout.on('data', d => buffer += d);
+        
         metaProcess.on('close', () => {
             try { 
-                resolve(JSON.parse(buffer)); 
+                const data = JSON.parse(buffer);
+                resolve(data); 
             } catch (e) { 
-                resolve({ title: "Video", duration_string: "N/A", description: "" }); 
+                console.error("Eroare parsare JSON Metadata:", e.message);
+                // Returnăm un obiect gol dar valid ca să nu crape frontend-ul
+                resolve({ title: "Titlu Indisponibil", duration_string: "N/A", description: "" }); 
             }
         });
     });
@@ -142,24 +168,40 @@ app.get('/api/download', async (req, res) => {
     if (!videoUrl) return res.status(400).json({ error: 'URL lipsă' });
 
     const platform = detectPlatform(videoUrl);
-    console.log(`[${platform.toUpperCase()}] Cerere info: ${videoUrl}`);
+    console.log(`[${platform.toUpperCase()}] Procesare: ${videoUrl}`);
 
     try {
+        // 1. Obținem Metadate
         const metadata = await getYtMetadata(videoUrl);
+        
+        // 2. Procesăm Transcript (Doar pt YouTube)
         let transcriptData = null;
-
         if (platform === 'youtube') {
             let originalText = await getOriginalTranscript(videoUrl);
-            if (!originalText) originalText = metadata.description || "";
             
-            const translatedText = await translateWithGPT(originalText);
-            transcriptData = {
-                original: originalText.substring(0, 1000) + "...",
-                translated: translatedText
-            };
+            // Dacă nu găsim subtitrare, luăm descrierea (dar doar dacă e lungă)
+            if (!originalText && metadata.description && metadata.description.length > 50) {
+                console.log("Fără subtitrare. Folosesc descrierea.");
+                originalText = metadata.description;
+            }
+
+            if (originalText) {
+                const translatedText = await translateWithGPT(originalText);
+                transcriptData = {
+                    original: originalText,
+                    translated: translatedText
+                };
+            }
         }
 
-        const displayDuration = metadata.duration_string || (metadata.duration ? `${Math.floor(metadata.duration / 60)}:${metadata.duration % 60}` : "N/A");
+        // Calcul durată afișată
+        let displayDuration = metadata.duration_string;
+        if (!displayDuration && metadata.duration) {
+            const m = Math.floor(metadata.duration / 60);
+            const s = metadata.duration % 60;
+            displayDuration = `${m}:${s.toString().padStart(2, '0')}`;
+        }
+        if (!displayDuration) displayDuration = "N/A";
 
         const formats = [
             { quality: 'MP3', url: `/api/stream?type=audio&url=${encodeURIComponent(videoUrl)}` },
@@ -169,15 +211,15 @@ app.get('/api/download', async (req, res) => {
         res.json({
             status: 'ok',
             data: {
-                title: metadata.title || "Video",
+                title: metadata.title || "Video Fără Titlu",
                 duration: displayDuration,
                 formats: formats,
                 transcript: transcriptData
             }
         });
     } catch (error) {
-        console.error("Eroare API Download:", error);
-        res.status(500).json({ error: 'Eroare la obținerea informațiilor.' });
+        console.error("Eroare CRITICĂ API:", error);
+        res.status(500).json({ error: 'Eroare internă server.' });
     }
 });
 
@@ -192,6 +234,7 @@ app.get('/api/stream', (req, res) => {
     const args = [
         '-o', '-', 
         '--no-check-certificates', 
+        '--no-warnings',
         '--force-ipv4', 
         '-f', isAudio ? 'bestaudio' : 'best', 
         url
@@ -206,17 +249,11 @@ app.get('/api/stream', (req, res) => {
 });
 
 // --- 8. RUTA FALLBACK ---
-// Trimite index.html pentru orice cerere care nu este de API (ex: root-ul '/')
 app.get('*', (req, res) => {
     res.sendFile(path.join(__dirname, 'public', 'index.html'));
 });
 
 // --- 9. PORNIRE SERVER ---
 app.listen(PORT, '0.0.0.0', () => {
-    console.log(`
-    🚀 Downloader Pro activ!
-    Domeniu: downloader.creatorsmart.ro
-    Port: ${PORT}
-    ----------------------------------
-    `);
+    console.log(`🚀 Server PRO pornit pe portul ${PORT}`);
 });
