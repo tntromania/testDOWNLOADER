@@ -6,16 +6,16 @@ const fs = require('fs');
 const { translate } = require('@vitalets/google-translate-api');
 
 const app = express();
-const PORT = 3003; // Portul pentru Coolify
+const PORT = 3003; // Portul setat în Coolify
 
 app.use(cors());
 app.use(express.json());
 app.use(express.static(path.join(__dirname, 'public')));
 
-// --- MODIFICARE 1: Fără .exe pentru Linux ---
+// MODIFICARE CRITICĂ PENTRU COOLIFY: Folosim 'yt-dlp' simplu, fără .exe
 const YTDLP_PATH = 'yt-dlp'; 
 
-// --- 1. Funcție: CURĂȚARE TEXT ---
+// --- 1. Funcție: CURĂȚARE TEXT (Logica Veche) ---
 function cleanVttText(vttContent) {
     if (!vttContent) return "";
     const lines = vttContent.split('\n');
@@ -24,7 +24,7 @@ function cleanVttText(vttContent) {
 
     lines.forEach(line => {
         line = line.trim();
-        // Filtre pentru linii inutile
+        // Filtre pentru a curăța mizeria din subtitrări
         if (!line || line.startsWith('WEBVTT') || line.includes('-->') || /^\d+$/.test(line) || 
             line.startsWith('Kind:') || line.startsWith('Language:') || line.startsWith('Style:')) return;
         
@@ -37,7 +37,7 @@ function cleanVttText(vttContent) {
     return cleanText.join(' ');
 }
 
-// --- 2. Funcție: Descarcă Transcriptul ---
+// --- 2. Funcție: Descarcă Transcriptul (Logica Veche) ---
 async function getOriginalTranscript(url) {
     const uniqueId = Date.now();
     const outputTemplate = path.join(__dirname, `trans_${uniqueId}`);
@@ -50,7 +50,7 @@ async function getOriginalTranscript(url) {
             '--convert-subs', 'vtt',
             '--output', outputTemplate,
             '--no-check-certificates',
-            '--no-warnings',
+            '--no-warnings', // Important pe server ca să nu umplem logurile de erori false
             url
         ];
 
@@ -64,7 +64,7 @@ async function getOriginalTranscript(url) {
                 try {
                     const content = fs.readFileSync(foundFile, 'utf8');
                     const text = cleanVttText(content);
-                    fs.unlinkSync(foundFile);
+                    fs.unlinkSync(foundFile); // Ștergem fișierul temporar
                     resolve(text);
                 } catch (e) { resolve(null); }
             } else { resolve(null); }
@@ -81,7 +81,8 @@ async function translateSecure(text) {
     } catch (err) { return "Traducere momentan indisponibilă."; }
 }
 
-// --- 4. Funcție: Metadata (Rapidă) ---
+// --- 4. Funcție: Metadata (Logica Veche - Dump JSON) ---
+// Asta extrage sigur Titlul și Durata
 function getYtMetadata(url) {
     return new Promise((resolve) => {
         const process = spawn(YTDLP_PATH, ['--dump-json', '--no-warnings', '--no-check-certificates', url]);
@@ -91,7 +92,7 @@ function getYtMetadata(url) {
             try { 
                 resolve(JSON.parse(buffer)); 
             } catch (e) { 
-                // Dacă eșuează JSON, dăm valori implicite ca să nu crape HTML-ul
+                // Fallback dacă crapă, ca să nu moară serverul
                 resolve({ title: "Video (Titlu Indisponibil)", description: "", duration_string: "N/A" }); 
             } 
         });
@@ -104,14 +105,15 @@ app.get('/api/download', async (req, res) => {
     if (!videoUrl) return res.status(400).json({ error: 'URL lipsă' });
 
     try {
-        // A. Luăm Metadata
+        // A. Luăm Metadata (Titlu/Durată)
         const metadata = await getYtMetadata(videoUrl);
         
         // B. Luăm Transcriptul
         let originalText = await getOriginalTranscript(videoUrl);
+        // Dacă nu găsim transcript, luăm descrierea
         if (!originalText) {
             originalText = metadata.description || "Nu s-a găsit text.";
-            originalText = originalText.replace(/https?:\/\/\S+/g, ''); // Scoatem linkuri
+            originalText = originalText.replace(/https?:\/\/\S+/g, '');
         }
 
         // C. Traducem
@@ -121,10 +123,11 @@ app.get('/api/download', async (req, res) => {
         }
 
         // D. Pregătim răspunsul PENTRU HTML-ul TĂU
-        // HTML-ul tău caută exact "MP4" și "MP3" în câmpul "quality"
+        // HTML-ul tău caută specific string-ul "MP4" sau "MP3" în câmpul quality.
+        // Aici facem legătura dintre logica veche și designul nou.
         const formats = [
             {
-                quality: 'MP4', 
+                quality: 'MP4', // AICI E CHEIA: HTML-ul tău caută fix textul ăsta
                 url: `/api/stream?url=${encodeURIComponent(videoUrl)}&type=video`,
                 hasAudio: true, hasVideo: true
             },
@@ -135,7 +138,7 @@ app.get('/api/download', async (req, res) => {
             }
         ];
 
-        // Structura JSON exact cum o vrea HTML-ul tău "Universal Pro"
+        // Trimitem JSON-ul
         res.json({
             status: 'ok',
             data: {
@@ -160,10 +163,11 @@ app.get('/api/stream', (req, res) => {
     const { url, type } = req.query;
     const isAudio = type === 'audio';
     
+    // Forțăm download-ul în browser
     res.setHeader('Content-Disposition', `attachment; filename="${isAudio ? 'audio.mp3' : 'video.mp4'}"`);
     res.setHeader('Content-Type', isAudio ? 'audio/mpeg' : 'video/mp4');
 
-    // Comanda pentru streaming direct
+    // "best" ia automat cea mai bună calitate disponibilă (de obicei 1080p sau 720p)
     const args = [
         '-o', '-', 
         '--no-warnings', 
@@ -177,7 +181,7 @@ app.get('/api/stream', (req, res) => {
     process.stdout.pipe(res);
 });
 
-// Ruta Fallback pentru Single Page Application
+// Ruta Fallback (încarcă index.html dacă intri pe site)
 app.get('*', (req, res) => res.sendFile(path.join(__dirname, 'public', 'index.html')));
 
 app.listen(PORT, '0.0.0.0', () => {
