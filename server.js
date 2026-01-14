@@ -201,7 +201,7 @@ app.get('/api/download', async (req, res) => {
 
         const formats = [
             { quality: 'Video HD (MP4)', url: `/api/stream?type=audio&url=${encodeURIComponent(videoUrl)}`,
-            { quality: 'Audio Only (MP3)', url: `/api/stream?type=video&url=${encodeURIComponent(videoUrl)}` }
+            { quality: 'Audio Only (MP3)', url: `/api/stream?type=audio&url=${encodeURIComponent(videoUrl)}`
         ];
 
         res.json({
