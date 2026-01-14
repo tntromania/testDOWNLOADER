@@ -16,6 +16,20 @@ app.use(express.static(path.join(__dirname, 'public')));
 
 const OPENAI_API_KEY = process.env.OPENAI_API_KEY;
 const YTDLP_PATH = 'yt-dlp'; 
+const COOKIES_PATH = path.join(__dirname, 'cookies.txt');
+
+// --- 0. INITIALIZARE COOKIES (CRITIC PENTRU DEBLOCARE) ---
+// Dacă am pus cookies în variabila de mediu, le scriem pe disc
+if (process.env.YOUTUBE_COOKIES) {
+    try {
+        // Curățăm ghilimelele dacă există și scriem fișierul
+        const cookiesContent = process.env.YOUTUBE_COOKIES.replace(/^"|"$/g, '');
+        fs.writeFileSync(COOKIES_PATH, cookiesContent, 'utf8');
+        console.log("✅ Cookies încărcate cu succes din Coolify!");
+    } catch (e) {
+        console.error("❌ Eroare la scrierea cookies:", e);
+    }
+}
 
 // --- 1. DETECTARE PLATFORMĂ ---
 function detectPlatform(url) {
@@ -35,7 +49,9 @@ function cleanVttText(vttContent) {
     lines.forEach(line => {
         line = line.trim();
         if (!line || line.includes('-->') || /^\d+$/.test(line) || line.startsWith('WEBVTT') || line.startsWith('NOTE')) return;
-        line = line.replace(/<[^>]*>/g, '');
+        line = line.replace(/<[^>]*>/g, ''); // Scoate tag-uri HTML
+        // Eliminăm caractere dubioase
+        line = line.replace(/&nbsp;/g, ' ').replace(/&#39;/g, "'");
         if (!seenLines.has(line) && line.length > 1) {
             seenLines.add(line);
             cleanText.push(line);
@@ -46,7 +62,6 @@ function cleanVttText(vttContent) {
 
 // --- 3. TRADUCERI ---
 async function translateWithGoogle(text) {
-    console.log("🔄 Fallback: Google Translate...");
     try {
         const res = await translate(text, { to: 'ro' });
         return res.text;
@@ -60,7 +75,7 @@ async function translateWithGPT(text) {
         const response = await axios.post('https://api.openai.com/v1/chat/completions', {
             model: "gpt-4o-mini",
             messages: [
-                { "role": "system", "content": "Traduce în Română. Păstrează sensul natural." },
+                { "role": "system", "content": "Traduce în Română. Fii concis și natural." },
                 { "role": "user", "content": textToTranslate }
             ],
             temperature: 0.3
@@ -77,54 +92,62 @@ async function translateWithGPT(text) {
 async function getOriginalTranscript(url) {
     const uniqueId = Date.now();
     const outputBase = path.join(__dirname, `temp_${uniqueId}`);
+    
+    // Pregătim argumentele
+    let args = [
+        '--skip-download', '--write-auto-sub', '--write-sub', '--convert-subs', 'vtt',
+        '--output', outputBase, '--no-check-certificates', '--no-warnings',
+        '--user-agent', 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/90.0.4430.212 Safari/537.36',
+        url
+    ];
+
+    // Dacă avem cookies, le folosim
+    if (fs.existsSync(COOKIES_PATH)) {
+        args.push('--cookies', COOKIES_PATH);
+    }
+
     return new Promise((resolve) => {
-        const subProcess = spawn(YTDLP_PATH, [
-            '--skip-download', '--write-auto-sub', '--write-sub', '--convert-subs', 'vtt',
-            '--output', outputBase, '--no-check-certificates', '--no-warnings', 
-            '--user-agent', 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/90.0.4430.212 Safari/537.36',
-            url
-        ]);
+        const subProcess = spawn(YTDLP_PATH, args);
+        
         subProcess.on('close', () => {
             const files = fs.readdirSync(__dirname);
             const vttFile = files.find(f => f.startsWith(`temp_${uniqueId}`) && f.endsWith('.vtt'));
             if (vttFile) {
-                const content = fs.readFileSync(path.join(__dirname, vttFile), 'utf8');
-                fs.unlinkSync(path.join(__dirname, vttFile));
+                const fullPath = path.join(__dirname, vttFile);
+                const content = fs.readFileSync(fullPath, 'utf8');
+                fs.unlinkSync(fullPath);
                 resolve(cleanVttText(content));
             } else { resolve(null); }
         });
     });
 }
 
-// --- 5. METADATE (AICI ERA PROBLEMA) ---
+// --- 5. METADATE ---
 function getYtMetadata(url) {
     return new Promise((resolve) => {
-        // MODIFICARE: Adăugat User-Agent pentru a păcăli YouTube că suntem browser, nu bot
-        const args = [
-            '--dump-json',
-            '--no-check-certificates',
-            '--no-warnings',
+        let args = [
+            '--dump-json', '--no-check-certificates', '--no-warnings',
             '--user-agent', 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/90.0.4430.212 Safari/537.36',
             url
         ];
 
+        // Injectăm Cookies dacă există
+        if (fs.existsSync(COOKIES_PATH)) {
+            args.push('--cookies', COOKIES_PATH);
+        }
+
         const metaProcess = spawn(YTDLP_PATH, args);
         let buffer = '';
-        let errorBuffer = '';
-
+        
         metaProcess.stdout.on('data', d => buffer += d);
-        metaProcess.stderr.on('data', d => errorBuffer += d); // Capturăm eroarea reală
-
-        metaProcess.on('close', (code) => {
-            if (code !== 0) {
-                console.error("❌ EROARE YT-DLP (Metadata):", errorBuffer.toString());
-            }
+        
+        metaProcess.on('close', () => {
             try { 
                 const data = JSON.parse(buffer);
                 resolve(data); 
             } catch (e) { 
-                console.log("⚠️ Nu s-a putut citi JSON-ul. Output brut:", buffer.toString());
-                resolve({ title: "Titlu Indisponibil (Verifică Logs)", duration: 0 }); 
+                console.log("⚠️ Eșec JSON. Probabil blocat de YouTube fără cookies.");
+                resolve({ title: "Titlu Indisponibil (Adaugă Cookies)", duration: 0 }); 
             }
         });
     });
@@ -142,14 +165,16 @@ app.get('/api/download', async (req, res) => {
 
         if (platform === 'youtube') {
             let originalText = await getOriginalTranscript(videoUrl);
+            // Dacă nu are transcript, încercăm descrierea
             if (!originalText && metadata.description) originalText = metadata.description;
+            
             if (originalText) {
                 const translatedText = await translateWithGPT(originalText);
                 transcriptData = { original: originalText, translated: translatedText };
             }
         }
 
-        // Calcul durată
+        // Formată durată
         let durationStr = "N/A";
         if (metadata.duration) {
             const m = Math.floor(metadata.duration / 60);
@@ -174,7 +199,6 @@ app.get('/api/download', async (req, res) => {
             }
         });
     } catch (error) {
-        console.error("Eroare server:", error);
         res.status(500).json({ error: 'Eroare internă.' });
     }
 });
@@ -186,12 +210,16 @@ app.get('/api/stream', (req, res) => {
     res.setHeader('Content-Type', isAudio ? 'audio/mpeg' : 'video/mp4');
     res.setHeader('Content-Disposition', `attachment; filename="${isAudio ? 'audio.mp3' : 'video.mp4'}"`);
     
-    const args = [
+    let args = [
         '-o', '-', '--no-check-certificates', '--no-warnings', '--force-ipv4',
         '--user-agent', 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/90.0.4430.212 Safari/537.36',
         '-f', isAudio ? 'bestaudio' : 'best', 
         url
     ];
+
+    if (fs.existsSync(COOKIES_PATH)) {
+        args.push('--cookies', COOKIES_PATH);
+    }
     
     const streamProcess = spawn(YTDLP_PATH, args);
     streamProcess.stdout.pipe(res);
