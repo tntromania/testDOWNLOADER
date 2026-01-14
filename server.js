@@ -14,8 +14,12 @@ app.use(express.json());
 app.use(express.static(path.join(__dirname, 'public')));
 
 // --- CHEIA TA OPENAI ---
-// Am pus cheia ta direct aici ca să fii sigur că merge 1:1
-const OPENAI_API_KEY = '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';
+const OPENAI_API_KEY = process.env.OPENAI_API_KEY;
+if (!OPENAI_API_KEY) {
+
+    console.warn("⚠️ OPENAI_API_KEY nu este setată în variabilele de mediu!");
+
+}
 
 // --- CONFIG LINUX ---
 const YTDLP_PATH = 'yt-dlp';
