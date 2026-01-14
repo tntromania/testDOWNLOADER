@@ -14,7 +14,10 @@ app.use(express.json());
 app.use(express.static(path.join(__dirname, 'public')));
 
 // --- CHEIA TA OPENAI (Păstrată 1:1 cum ai cerut) ---
-const OPENAI_API_KEY = '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';
+const OPENAI_API_KEY = process.env.OPENAI_API_KEY;
+if (!OPENAI_API_KEY) {
+    console.warn(":warning: OPENAI_API_KEY nu este setată în variabilele de mediu!");
+}
 
 // --- MODIFICARE SERVER: Fără .exe pentru Linux ---
 const YTDLP_PATH = 'yt-dlp';
