@@ -3,20 +3,21 @@ const cors = require('cors');
 const { spawn } = require('child_process');
 const path = require('path');
 const fs = require('fs');
-const axios = require('axios'); // NECESAR PENTRU OPENAI
+const axios = require('axios'); // Asigură-te că ai dat npm install axios
 const { translate } = require('@vitalets/google-translate-api'); 
 
 const app = express();
-const PORT = 3003; // Portul pentru Coolify
+const PORT = 3003; 
 
 app.use(cors());
 app.use(express.json());
 app.use(express.static(path.join(__dirname, 'public')));
 
-// --- CHEIA TA OPENAI (Păstrată 1:1 cum ai cerut) ---
+// --- CHEIA TA OPENAI ---
+// Am pus cheia ta direct aici ca să fii sigur că merge 1:1
 const OPENAI_API_KEY = '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';
 
-// --- MODIFICARE SERVER: Fără .exe pentru Linux ---
+// --- CONFIG LINUX ---
 const YTDLP_PATH = 'yt-dlp';
 
 // --- DETECTARE PLATFORMĂ ---
@@ -34,7 +35,6 @@ function cleanVttText(vttContent) {
     const lines = vttContent.split('\n');
     let cleanText = [];
     let seenLines = new Set();
-
     lines.forEach(line => {
         line = line.trim();
         if (!line || line.includes('-->') || /^\d+$/.test(line) || line.startsWith('WEBVTT')) return;
@@ -49,23 +49,23 @@ function cleanVttText(vttContent) {
 
 // --- 2. TRADUCERE GOOGLE (FALLBACK) ---
 async function translateWithGoogle(text) {
-    console.log("\n🔄 Trec pe Google Translate (Gratuit)...");
+    console.log("🔄 Fallback: Google Translate...");
     try {
         const res = await translate(text, { to: 'ro' });
         return res.text;
     } catch (err) {
-        return text;
+        return text; // Dacă și asta pică, returnăm originalul
     }
 }
 
-// --- 3. TRADUCERE GPT CU STREAMING (MATRIX STYLE) ---
-// --- COPIATĂ 1:1 DIN CODUL TĂU VECHI ---
+// --- 3. TRADUCERE GPT (LOGICA TA) ---
 async function translateWithGPT(text) {
     if (!text || text.length < 5) return "Nu există suficient text.";
+    
+    // Limităm la 3000 caractere pentru a nu consuma tokeni inutili dacă e video lung
     const textToTranslate = text.substring(0, 3000);
 
-    console.log("\n🤖 GPT-4o-mini începe traducerea:");
-    console.log("------------------------------------------------");
+    console.log("🤖 GPT-4o-mini începe traducerea...");
 
     try {
         const response = await axios.post('https://api.openai.com/v1/chat/completions', {
@@ -86,41 +86,34 @@ async function translateWithGPT(text) {
 
         let fullTranslation = "";
 
+        // Procesăm stream-ul manual (exact cum aveai tu)
         return new Promise((resolve, reject) => {
             response.data.on('data', (chunk) => {
                 const lines = chunk.toString().split('\n').filter(line => line.trim() !== '');
-                
                 for (const line of lines) {
                     const message = line.replace(/^data: /, '');
-                    if (message === '[DONE]') return; 
-                    
+                    if (message === '[DONE]') return;
                     try {
                         const parsed = JSON.parse(message);
                         const content = parsed.choices[0].delta.content;
-                        if (content) {
-                            process.stdout.write(content); 
-                            fullTranslation += content;
-                        }
+                        if (content) fullTranslation += content;
                     } catch (error) {}
                 }
             });
-
             response.data.on('end', () => {
-                console.log("\n------------------------------------------------");
-                console.log("✅ Gata! Traducerea completă salvată.");
+                console.log("✅ Traducere GPT finalizată.");
                 resolve(fullTranslation);
             });
-
             response.data.on('error', (err) => reject(err));
         });
 
     } catch (error) {
-        console.warn("\n⚠️ Eroare OpenAI Stream:", error.message);
+        console.warn("⚠️ Eroare OpenAI:", error.message);
         return await translateWithGoogle(text);
     }
 }
 
-// --- 4. LOGICA DOWNLOADER ---
+// --- 4. HELPERS DOWNLOAD ---
 async function getOriginalTranscript(url) {
     const uniqueId = Date.now();
     const outputTemplate = path.join(__dirname, `trans_${uniqueId}`);
@@ -163,7 +156,7 @@ function getYtMetadata(url) {
     });
 }
 
-// --- ENDPOINTS ---
+// --- ENDPOINT PRINCIPAL ---
 app.get('/api/download', async (req, res) => {
     const videoUrl = req.query.url;
     if (!videoUrl) return res.status(400).json({ error: 'URL lipsă' });
@@ -175,40 +168,35 @@ app.get('/api/download', async (req, res) => {
         const metadata = await getYtMetadata(videoUrl);
         let transcriptData = null;
 
-        // PROCESĂM TRANSCRIPTUL DOAR PENTRU YOUTUBE
         if (platform === 'youtube') {
-            console.log("📝 YouTube detectat - extrag transcript...");
+            console.log("📝 Extrag transcript...");
             let originalText = await getOriginalTranscript(videoUrl);
 
             if (!originalText) {
-                console.log("Fără subtitrare. Folosesc descrierea.");
                 originalText = metadata.description || "Niciun text găsit.";
             }
 
-            // Traducere cu GPT (Funcția copiată)
             const translatedText = await translateWithGPT(originalText);
             
             transcriptData = {
-                original: originalText.substring(0, 1000) + "...",
+                original: originalText,
                 translated: translatedText
             };
-        } else {
-            console.log(`⏩ ${platform} - skip transcript (doar download)`);
         }
 
-        // --- FORMAT MATRICE PENTRU FRONTEND-UL TĂU ---
-        // Aici am pus path-ul relativ `/api/stream` cum ai cerut
+        // --- CHEIA SUCCESULUI PENTRU HTML-UL TĂU NOU ---
+        // Aici construim array-ul exact cum îl așteaptă JS-ul din frontend
         const formats = [
             { 
-                quality: 'MP4', 
-                format: 'mp4',
-                hasVideo: true,
+                quality: 'MP4',      // Doar etichetă vizuală
+                format: 'mp4',       // CRITIC: Frontend-ul caută asta
+                hasVideo: true,      // CRITIC: Frontend-ul caută asta
                 hasAudio: true,
                 url: `/api/stream?type=video&url=${encodeURIComponent(videoUrl)}` 
             },
             { 
                 quality: 'MP3', 
-                format: 'mp3',
+                format: 'mp3',       // CRITIC: Frontend-ul caută asta
                 hasVideo: false,
                 hasAudio: true,
                 url: `/api/stream?type=audio&url=${encodeURIComponent(videoUrl)}` 
@@ -221,28 +209,29 @@ app.get('/api/download', async (req, res) => {
                 title: metadata.title,
                 duration: metadata.duration_string,
                 formats: formats,
-                transcript: transcriptData // Null pentru non-YouTube
+                transcript: transcriptData
             }
         });
 
     } catch (error) {
-        console.error(error);
+        console.error("Eroare server:", error);
         res.status(500).json({ error: 'Eroare internă.' });
     }
 });
 
+// --- STREAMING ---
 app.get('/api/stream', (req, res) => {
     const { url, type } = req.query;
     res.setHeader('Content-Disposition', `attachment; filename="${type === 'audio' ? 'audio.mp3' : 'video.mp4'}"`);
-    // Folosim YTDLP_PATH setat pentru Linux
+    
     const args = ['-o', '-', '--no-check-certificates', '--force-ipv4', '-f', type === 'audio' ? 'bestaudio' : 'best', url];
     const process = spawn(YTDLP_PATH, args);
     process.stdout.pipe(res);
 });
 
-// Fallback pentru index.html
+// Servește index.html-ul tău NOU
 app.get('*', (req, res) => res.sendFile(path.join(__dirname, 'public', 'index.html')));
 
 app.listen(PORT, '0.0.0.0', () => {
-    console.log(`📥 Downloader Pro (Smart GPT) pornit pe ${PORT}`);
+    console.log(`🚀 Server GPT-PRO pornit pe ${PORT}`);
 });
