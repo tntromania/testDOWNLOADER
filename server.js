@@ -15,9 +15,12 @@ app.use(express.static(path.join(__dirname, 'public')));
 const YTDLP_PATH = 'yt-dlp';
 const COOKIES_PATH = path.join(__dirname, 'cookies.txt');
 
-// ---------------- CLEAN VTT ----------------
+/* =========================
+   UTIL: CLEAN VTT
+========================= */
 function cleanVttText(vttContent) {
     if (!vttContent) return "";
+
     const lines = vttContent.split('\n');
     const seen = new Set();
     const out = [];
@@ -35,7 +38,7 @@ function cleanVttText(vttContent) {
         ) continue;
 
         line = line.replace(/<[^>]*>/g, '');
-        if (!seen.has(line)) {
+        if (!seen.has(line) && line.length > 1) {
             seen.add(line);
             out.push(line);
         }
@@ -43,29 +46,50 @@ function cleanVttText(vttContent) {
     return out.join(' ');
 }
 
-// ---------------- METADATA ----------------
+/* =========================
+   METADATA
+========================= */
+function formatDuration(sec) {
+    if (!sec) return 'N/A';
+    const m = Math.floor(sec / 60);
+    const s = sec % 60;
+    return `${m}:${String(s).padStart(2, '0')}`;
+}
+
 function getYtMetadata(url) {
     return new Promise((resolve) => {
         const p = spawn(YTDLP_PATH, [
             '--cookies', COOKIES_PATH,
-            '--dump-json',
+            '--dump-single-json',
             '--no-warnings',
             url
         ]);
 
         let buf = '';
         p.stdout.on('data', d => buf += d);
+
         p.on('close', () => {
             try {
-                resolve(JSON.parse(buf));
+                const json = JSON.parse(buf);
+                resolve({
+                    title: json.title || 'YouTube Video',
+                    description: json.description || '',
+                    duration_string: json.duration_string || formatDuration(json.duration)
+                });
             } catch {
-                resolve({ title: 'YouTube Video', description: '', duration_string: 'N/A' });
+                resolve({
+                    title: 'YouTube Video',
+                    description: '',
+                    duration_string: 'N/A'
+                });
             }
         });
     });
 }
 
-// ---------------- TRANSCRIPT ----------------
+/* =========================
+   TRANSCRIPT (EN + EN-ORIG)
+========================= */
 function getOriginalTranscript(url) {
     return new Promise((resolve) => {
         const id = Date.now();
@@ -74,6 +98,7 @@ function getOriginalTranscript(url) {
         const p = spawn(YTDLP_PATH, [
             '--cookies', COOKIES_PATH,
             '--skip-download',
+            '--write-sub',
             '--write-auto-sub',
             '--sub-lang', 'en',
             '--convert-subs', 'vtt',
@@ -82,17 +107,29 @@ function getOriginalTranscript(url) {
         ]);
 
         p.on('close', () => {
-            const file = `${out}.en.vtt`;
-            if (!fs.existsSync(file)) return resolve(null);
+            const possibleFiles = [
+                `${out}.en.vtt`,
+                `${out}.en-orig.vtt`
+            ];
 
-            const text = cleanVttText(fs.readFileSync(file, 'utf8'));
-            fs.unlinkSync(file);
-            resolve(text);
+            const found = possibleFiles.find(f => fs.existsSync(f));
+            if (!found) return resolve(null);
+
+            try {
+                const content = fs.readFileSync(found, 'utf8');
+                const text = cleanVttText(content);
+                fs.unlinkSync(found);
+                resolve(text);
+            } catch {
+                resolve(null);
+            }
         });
     });
 }
 
-// ---------------- TRANSLATE ----------------
+/* =========================
+   TRANSLATE
+========================= */
 async function translateSecure(text) {
     if (!text || text.length < 10) return "Nu există text suficient.";
     try {
@@ -103,16 +140,19 @@ async function translateSecure(text) {
     }
 }
 
-// ---------------- API ----------------
+/* =========================
+   API: DOWNLOAD INFO
+========================= */
 app.get('/api/download', async (req, res) => {
     const url = req.query.url;
     if (!url) return res.status(400).json({ error: 'URL lipsă' });
 
     try {
         const meta = await getYtMetadata(url);
+
         let transcript = await getOriginalTranscript(url);
 
-        if (!transcript) {
+        if (!transcript || transcript.length < 5) {
             transcript = meta.description?.replace(/https?:\/\/\S+/g, '') || '';
         }
 
@@ -124,7 +164,7 @@ app.get('/api/download', async (req, res) => {
                 title: meta.title,
                 duration: meta.duration_string,
                 transcript: {
-                    original: transcript,
+                    original: transcript || "Fără text disponibil.",
                     translated
                 },
                 formats: [
@@ -134,7 +174,7 @@ app.get('/api/download', async (req, res) => {
                         url: `/api/stream?url=${encodeURIComponent(url)}&type=video`
                     },
                     {
-                        quality: '192kbps',
+                        quality: '192',
                         format: 'mp3',
                         url: `/api/stream?url=${encodeURIComponent(url)}&type=audio`
                     }
@@ -142,29 +182,39 @@ app.get('/api/download', async (req, res) => {
             }
         });
 
-    } catch (e) {
+    } catch (err) {
+        console.error(err);
         res.status(500).json({ error: 'Eroare server' });
     }
 });
 
-// ---------------- STREAM ----------------
+/* =========================
+   API: STREAM
+========================= */
 app.get('/api/stream', (req, res) => {
     const { url, type } = req.query;
-    const audio = type === 'audio';
+    const isAudio = type === 'audio';
 
-    res.setHeader('Content-Type', audio ? 'audio/mpeg' : 'video/mp4');
+    res.setHeader(
+        'Content-Disposition',
+        `attachment; filename="${isAudio ? 'audio.mp3' : 'video.mp4'}"`
+    );
+    res.setHeader('Content-Type', isAudio ? 'audio/mpeg' : 'video/mp4');
 
-    const p = spawn(YTDLP_PATH, [
+    const args = [
         '--cookies', COOKIES_PATH,
-        '-f', audio ? 'bestaudio' : 'best',
+        '-f', isAudio ? 'bestaudio' : 'best',
         '-o', '-',
         url
-    ]);
+    ];
 
+    const p = spawn(YTDLP_PATH, args);
     p.stdout.pipe(res);
 });
 
-// ---------------- START ----------------
+/* =========================
+   START
+========================= */
 app.listen(PORT, '0.0.0.0', () => {
     console.log(`🚀 Server pornit pe port ${PORT}`);
 });
