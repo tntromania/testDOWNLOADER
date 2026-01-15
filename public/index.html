@@ -409,7 +409,7 @@
         try {
             const response = await fetch(`/api/download?url=${encodeURIComponent(targetUrl)}&platform=${currentPlatform}`);
 
-            if (!response.ok) throw new Error("Eroare comunicare server");
+            if (!response.ok) throw new Error("Asigură-te că ai ales bine platforma");
             const data = await response.json();
 
             if (data.status === 'ok') {
@@ -426,8 +426,9 @@
 
                 // Gestionare Transcript (DOAR PENTRU YOUTUBE)
                 if (currentPlatform === 'youtube' && data.data.transcript && data.data.transcript.original) {
+                    console.log("Transcript primit!", data.data.transcript); // Adaugă asta pentru debug în browser (F12)
                     originalTranscript.textContent = data.data.transcript.original;
-                    translatedTranscript.textContent = data.data.transcript.translated || "Se procesează...";
+                    translatedTranscript.textContent = data.data.transcript.translated || "Traducere indisponibilă";
                     transcriptSection.classList.add('show');
                 }
 

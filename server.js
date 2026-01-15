@@ -51,9 +51,13 @@ function cleanVttText(vttContent) {
     return cleanText.join(' ');
 }
 
-// --- 2. TRADUCERE GPT-4o-mini ---
+// --- 2. TRADUCERE GPT-4o-mini CU LOGS ---
 async function translateWithAI(text) {
     if (!text || text.length < 5) return "Nu există suficient text.";
+    
+    console.log("\n--- [AI DEBUG] Începe procesul de traducere ---");
+    console.log(`[AI DEBUG] Lungime text original: ${text.length} caractere`);
+
     if (OPENAI_API_KEY) {
         try {
             const response = await axios.post('https://api.openai.com/v1/chat/completions', {
@@ -64,61 +68,72 @@ async function translateWithAI(text) {
                 ],
                 temperature: 0.3
             }, { headers: { 'Authorization': `Bearer ${OPENAI_API_KEY}` } });
-            return response.data.choices[0].message.content;
+
+            const translated = response.data.choices[0].message.content;
+            
+            console.log("--- [AI DEBUG] Răspuns GPT primit cu succes ---");
+            console.log("[AI DEBUG] Fragment traducere:", translated.substring(0, 150) + "...");
+            return translated;
+
         } catch (e) { 
-            console.warn("GPT Error, fallback Google.");
+            console.error("--- [AI DEBUG] Eroare OpenAI API ---", e.message);
+            console.warn("Fallback la Google Translate...");
         }
     }
+
     try {
         const res = await translate(text.substring(0, 4500), { to: 'ro' });
+        console.log("--- [AI DEBUG] Traducere Google Translate finalizată ---");
         return res.text;
     } catch (err) { 
+        console.error("--- [AI DEBUG] Toate metodele de traducere au eșuat ---");
         return "Traducere indisponibilă."; 
     }
 }
 
-// --- 3. EXTRAGERE TRANSCRIPT (DOAR YOUTUBE) ---
+// --- 3. EXTRAGERE TRANSCRIPT ÎMBUNĂTĂȚITĂ ---
 async function getOriginalTranscript(url) {
     const uniqueId = Date.now();
     const outputTemplate = path.join(__dirname, `trans_${uniqueId}`);
+    
+    console.log(`\n--- [TRANSCRIPT DEBUG] Se caută transcript pentru: ${url} ---`);
+
     const args = [
         '--skip-download', 
-        '--write-sub', 
-        '--write-auto-sub',
-        '--sub-lang', 'en', 
+        '--write-auto-sub', // Încearcă subtitrări generate automat
+        '--write-sub',      // Încearcă subtitrări create de autor
+        '--sub-lang', 'en.*,en', // Acceptă orice variantă de engleză (en-US, en-GB etc)
         '--convert-subs', 'vtt',
         '--output', outputTemplate, 
         '--no-check-certificates',
         '--user-agent', 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
         url
     ];
+
     if (fs.existsSync(COOKIES_PATH)) args.push('--cookies', COOKIES_PATH);
 
     return new Promise((resolve) => {
         const proc = spawn(YTDLP_PATH, args);
-        
+
         proc.on('close', () => {
-            const possibleFiles = [
-                `${outputTemplate}.en.vtt`, 
-                `${outputTemplate}.en-orig.vtt`,
-                `${outputTemplate}.en-US.vtt`
-            ];
-            
-            let foundFile = possibleFiles.find(f => fs.existsSync(f));
-            
+            // Căutăm orice fișier care începe cu template-ul nostru și se termină în .vtt
+            const files = fs.readdirSync(__dirname);
+            const foundFile = files.find(f => f.startsWith(`trans_${uniqueId}`) && f.endsWith('.vtt'));
+
             if (foundFile) {
-                const content = fs.readFileSync(foundFile, 'utf8');
+                const filePath = path.join(__dirname, foundFile);
+                console.log(`[TRANSCRIPT DEBUG] Fișier găsit: ${foundFile}`);
+                const content = fs.readFileSync(filePath, 'utf8');
                 const text = cleanVttText(content);
-                fs.unlinkSync(foundFile);
+                
+                // Ștergem fișierul după citire
+                fs.unlinkSync(filePath);
+                console.log(`[TRANSCRIPT DEBUG] Text extras: ${text.substring(0, 100)}...`);
                 resolve(text);
             } else { 
+                console.log(`[TRANSCRIPT DEBUG] Nu s-a găsit niciun fișier de subtitrare.`);
                 resolve(null); 
             }
-        });
-        
-        proc.on('error', (err) => {
-            console.error('Transcript error:', err);
-            resolve(null);
         });
     });
 }
