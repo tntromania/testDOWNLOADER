@@ -13,83 +13,54 @@ app.use(cors());
 app.use(express.json());
 app.use(express.static(path.join(__dirname, 'public')));
 
-// --- CONFIGURARE ---
-// Cheia ta este hardcodată aici pentru siguranță, ca să nu depindă de ENV
-const OPENAI_API_KEY = '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';
+const OPENAI_API_KEY = process.env.OPENAI_API_KEY;
 const YTDLP_PATH = 'yt-dlp';
 
-// --- 1. CURĂȚARE TEXT (VTT) ---
+// --- CURĂȚARE TEXT VTT ---
 function cleanVttText(vttContent) {
     if (!vttContent) return "";
+
     const lines = vttContent.split('\n');
     let cleanText = [];
     let seenLines = new Set();
 
     lines.forEach(line => {
         line = line.trim();
-        // Eliminăm gunoaiele tehnice din VTT
-        if (
-            !line || 
-            line.includes('-->') || 
-            /^\d+$/.test(line) || 
-            line.startsWith('WEBVTT') || 
-            line.startsWith('Kind:') || 
-            line.startsWith('Language:')
-        ) return;
 
-        // Eliminăm tag-urile HTML (<c.color...>)
+        if (
+            !line ||
+            line.startsWith('WEBVTT') ||
+            line.includes('-->') ||
+            /^\d+$/.test(line) ||
+            line.startsWith('Kind:') ||
+            line.startsWith('Language:') ||
+            line.startsWith('NOTE') ||
+            line.startsWith('Style:')
+        ) {
+            return;
+        }
+
         line = line.replace(/<[^>]*>/g, '');
-        
-        // Eliminăm duplicatele consecutive
+
         if (!seenLines.has(line) && line.length > 1) {
             seenLines.add(line);
             cleanText.push(line);
         }
     });
+
     return cleanText.join(' ');
 }
 
-// --- 2. TRADUCERE GPT (SIMPLIFICATĂ PENTRU STABILITATE) ---
-async function translateWithGPT(text) {
-    if (!text || text.length < 5) return "Text insuficient.";
-    
-    try {
-        const response = await axios.post('https://api.openai.com/v1/chat/completions', {
-            model: "gpt-4o-mini",
-            messages: [
-                { "role": "system", "content": "Traduce în Română. Păstrează sensul dar fă-l să sune natural." },
-                { "role": "user", "content": text.substring(0, 4000) } // Limităm lungimea
-            ],
-            temperature: 0.3
-        }, {
-            headers: { 'Authorization': `Bearer ${OPENAI_API_KEY}` }
-        });
-        return response.data.choices[0].message.content;
-    } catch (e) {
-        console.error("Eroare GPT:", e.message);
-        return await translateWithGoogle(text); // Fallback
-    }
-}
-
-// --- 3. TRADUCERE GOOGLE (FALLBACK) ---
-async function translateWithGoogle(text) {
-    try {
-        const res = await translate(text.substring(0, 4000), { to: 'ro' });
-        return res.text;
-    } catch (e) { return text; }
-}
-
-// --- 4. EXTRAGERE TRANSCRIPT (METODA SIGURĂ) ---
+// --- EXTRAGERE TRANSCRIPT (LOGICA FUNCȚIONALĂ) ---
 async function getOriginalTranscript(url) {
     const uniqueId = Date.now();
-    // Nu punem extensia în output template, yt-dlp o pune singur
-    const outputTemplate = path.join(__dirname, `sub_${uniqueId}`);
+    const outputTemplate = path.join(__dirname, `trans_${uniqueId}`);
 
     return new Promise((resolve) => {
         const args = [
             '--skip-download',
             '--write-sub', '--write-auto-sub',
-            '--sub-lang', 'en,ro', // Încearcă engleză sau română
+            '--sub-lang', 'en',
             '--convert-subs', 'vtt',
             '--output', outputTemplate,
             '--no-check-certificates',
@@ -99,20 +70,22 @@ async function getOriginalTranscript(url) {
 
         const process = spawn(YTDLP_PATH, args);
 
-        process.on('close', (code) => {
-            // Căutăm ORICE fișier care începe cu ID-ul nostru și se termină în .vtt
-            const dirFiles = fs.readdirSync(__dirname);
-            const foundFile = dirFiles.find(f => f.startsWith(`sub_${uniqueId}`) && f.endsWith('.vtt'));
+        process.on('close', () => {
+            const possibleFiles = [
+                `${outputTemplate}.en.vtt`,
+                `${outputTemplate}.en-orig.vtt`
+            ];
+
+            let foundFile = possibleFiles.find(f => fs.existsSync(f));
 
             if (foundFile) {
                 try {
-                    const fullPath = path.join(__dirname, foundFile);
-                    const content = fs.readFileSync(fullPath, 'utf8');
-                    const clean = cleanVttText(content);
-                    fs.unlinkSync(fullPath); // Curățenie
-                    resolve(clean);
+                    const content = fs.readFileSync(foundFile, 'utf8');
+                    const text = cleanVttText(content);
+                    fs.unlinkSync(foundFile);
+                    resolve(text);
                 } catch (e) {
-                    console.error("Eroare citire VTT:", e);
+                    console.error("Eroare citire fișier:", e);
                     resolve(null);
                 }
             } else {
@@ -122,99 +95,183 @@ async function getOriginalTranscript(url) {
     });
 }
 
-// --- 5. ENDPOINT DOWNLOAD ---
-app.get('/api/download', async (req, res) => {
-    const videoUrl = req.query.url;
-    if (!videoUrl) return res.status(400).json({ error: 'URL lipsă' });
+// --- TRADUCERE GOOGLE (FALLBACK) ---
+async function translateWithGoogle(text) {
+    console.log("🔄 Fallback: Google Translate...");
+    try {
+        const res = await translate(text.substring(0, 4500), { to: 'ro' });
+        return res.text;
+    } catch (err) {
+        console.error("Eroare Google Translate:", err.message);
+        return "Traducere momentan indisponibilă.";
+    }
+}
 
-    console.log(`\n▶️ Procesez: ${videoUrl}`);
+// --- TRADUCERE GPT (dacă există API KEY) ---
+async function translateWithGPT(text) {
+    if (!text || text.length < 5) return "Nu există suficient text.";
+
+    if (!OPENAI_API_KEY) {
+        console.log("⚠️ OPENAI_API_KEY lipsă, folosesc Google Translate");
+        return await translateWithGoogle(text);
+    }
+
+    const textToTranslate = text.substring(0, 4000);
+    console.log("🤖 GPT-4o-mini începe traducerea...");
 
     try {
-        // A. METADATE (Titlu, Durată)
-        const metadata = await new Promise(resolve => {
-            const proc = spawn(YTDLP_PATH, ['--dump-json', '--no-warnings', '--no-check-certificates', videoUrl]);
-            let d = '';
-            proc.stdout.on('data', c => d += c);
-            proc.on('close', () => {
-                try { resolve(JSON.parse(d)); } 
-                catch { resolve({ title: "Video Fără Titlu", duration_string: "N/A", description: "" }); }
-            });
+        const response = await axios.post('https://api.openai.com/v1/chat/completions', {
+            model: "gpt-4o-mini",
+            messages: [
+                { "role": "system", "content": "Ești un traducător profesionist. Tradu textul următor în limba Română. Păstrează sensul exact, dar fă-l să sune natural. Nu adăuga note explicative." },
+                { "role": "user", "content": textToTranslate }
+            ],
+            temperature: 0.3
+        }, {
+            headers: {
+                'Authorization': `Bearer ${OPENAI_API_KEY}`,
+                'Content-Type': 'application/json'
+            }
         });
 
-        // B. TRANSCRIPT (Doar pt YouTube)
-        let transcriptData = null;
-        if (videoUrl.includes('youtu')) {
-            let originalText = await getOriginalTranscript(videoUrl);
-            
-            // Dacă nu e subtitrare, luăm descrierea
-            if (!originalText && metadata.description) {
-                console.log("⚠️ Fără subtitrare. Folosesc descrierea.");
-                originalText = metadata.description;
-            }
+        return response.data.choices[0].message.content;
+    } catch (error) {
+        console.warn("⚠️ Eroare OpenAI:", error.message);
+        return await translateWithGoogle(text);
+    }
+}
 
-            if (originalText) {
-                const translatedText = await translateWithGPT(originalText);
-                transcriptData = {
-                    original: originalText,
-                    translated: translatedText
-                };
+// --- METADATA VIDEO ---
+function getYtMetadata(url) {
+    return new Promise((resolve) => {
+        const process = spawn(YTDLP_PATH, ['--dump-json', '--no-warnings', '--no-check-certificates', url]);
+        let buffer = '';
+        process.stdout.on('data', d => buffer += d);
+        process.on('close', () => {
+            try {
+                resolve(JSON.parse(buffer));
+            } catch (e) {
+                console.error("Eroare parsare JSON:", e.message);
+                resolve({ title: "YouTube Video", description: "", duration_string: "N/A" });
             }
+        });
+    });
+}
+
+// --- ENDPOINT PRINCIPAL ---
+app.get('/api/download', async (req, res) => {
+    const videoUrl = req.query.url;
+    console.log(`\n[INFO] Procesez: ${videoUrl}`);
+
+    if (!videoUrl) return res.status(400).json({ error: 'URL lipsă' });
+
+    try {
+        // 1. Metadata
+        const metadata = await getYtMetadata(videoUrl);
+        console.log(`✓ Titlu: ${metadata.title}`);
+
+        // 2. Transcript
+        console.log("-> Caut transcript...");
+        let originalText = await getOriginalTranscript(videoUrl);
+
+        if (!originalText && metadata.description) {
+            console.log("-> Nu am găsit subtitrare, folosesc descrierea.");
+            originalText = metadata.description.replace(/https?:\/\/\S+/g, '');
         }
 
-        // C. GENERARE FORMATE (CRITIC PENTRU HTML-UL TĂU)
-        // HTML-ul tău caută exact string-urile: "360p", "1080p", etc.
-        // Trebuie să construim array-ul exact așa cum vrea el.
-        const qualities = ['360', '480', '720', '1080', '1440', '2160'];
+        // 3. Traducere
+        let translatedText = "Se procesează...";
+        if (originalText && originalText.length > 5) {
+            translatedText = await translateWithGPT(originalText);
+        } else {
+            translatedText = "Nu există conținut text de tradus.";
+        }
+
+        // 4. Formate (CU CÂMPUL format inclus!)
+        const qualities = ['360', '480', '720', '1080'];
         const formats = [];
 
-        // Generăm opțiunile video
         qualities.forEach(q => {
             formats.push({
-                quality: q + 'p', // Rezultă "1080p" -> HTML-ul va fi fericit
+                quality: q + 'p',
                 format: 'mp4',
-                hasVideo: true,
+                url: `/api/stream?url=${encodeURIComponent(videoUrl)}&type=video`,
                 hasAudio: true,
-                url: `/api/stream?type=video&url=${encodeURIComponent(videoUrl)}`
+                hasVideo: true
             });
         });
 
-        // Generăm opțiunea audio
         formats.push({
-            quality: '192', // HTML-ul caută "192" la audio
+            quality: '192',
             format: 'mp3',
-            hasVideo: false,
+            url: `/api/stream?url=${encodeURIComponent(videoUrl)}&type=audio`,
             hasAudio: true,
-            url: `/api/stream?type=audio&url=${encodeURIComponent(videoUrl)}`
+            hasVideo: false
         });
 
-        // D. TRIMITEM RĂSPUNSUL
         res.json({
             status: 'ok',
             data: {
-                title: metadata.title,
-                duration: metadata.duration_string,
-                formats: formats, // Lista corectă
-                transcript: transcriptData
+                title: metadata.title || "Video Fără Titlu",
+                duration: metadata.duration_string || "N/A",
+                formats: formats,
+                transcript: {
+                    original: originalText ? originalText.substring(0, 3000) : "Nu s-a găsit text.",
+                    translated: translatedText
+                }
             }
         });
 
+        console.log(`✓ Gata! Trimis către client.`);
+
     } catch (error) {
-        console.error("Eroare server:", error);
-        res.status(500).json({ error: 'Eroare internă.' });
+        console.error("❌ Eroare:", error.message);
+        res.status(500).json({ error: 'Eroare la procesare.' });
     }
 });
 
-// --- 6. ENDPOINT STREAMING ---
+// --- ENDPOINT STREAMING ---
 app.get('/api/stream', (req, res) => {
-    const { url, type } = req.query;
-    res.setHeader('Content-Disposition', `attachment; filename="${type === 'audio' ? 'audio.mp3' : 'video.mp4'}"`);
-    const args = ['-o', '-', '--no-check-certificates', '--force-ipv4', '-f', type === 'audio' ? 'bestaudio' : 'best', url];
-    spawn(YTDLP_PATH, args).stdout.pipe(res);
+    const videoUrl = req.query.url;
+    const type = req.query.type;
+    const isAudio = type === 'audio';
+
+    res.setHeader('Content-Disposition', `attachment; filename="${isAudio ? 'audio.mp3' : 'video.mp4'}"`);
+    res.setHeader('Content-Type', isAudio ? 'audio/mpeg' : 'video/mp4');
+
+    const args = [
+        '-o', '-',
+        '--no-warnings',
+        '--no-check-certificates',
+        '--force-ipv4',
+        '-f', isAudio ? 'bestaudio' : 'best',
+        videoUrl
+    ];
+
+    const streamProcess = spawn(YTDLP_PATH, args);
+    streamProcess.stdout.pipe(res);
+
+    streamProcess.on('error', (err) => {
+        console.error("Stream error:", err);
+    });
 });
 
-// Servește HTML
-app.get('*', (req, res) => res.sendFile(path.join(__dirname, 'public', 'index.html')));
+// --- RUTA FALLBACK ---
+app.get('*', (req, res) => {
+    const indexPath = path.join(__dirname, 'public', 'index.html');
+    if (fs.existsSync(indexPath)) {
+        res.sendFile(indexPath);
+    } else {
+        res.status(404).send('Index.html not found');
+    }
+});
 
 app.listen(PORT, '0.0.0.0', () => {
-    console.log(`🚀 Server gata pe portul ${PORT}`);
+    console.log(`🚀 Server pornit pe portul ${PORT}`);
+    console.log(`📡 API: http://localhost:${PORT}/api/download`);
+    if (OPENAI_API_KEY) {
+        console.log(`🤖 OpenAI GPT: ACTIVAT`);
+    } else {
+        console.log(`🔄 Google Translate: ACTIVAT (fallback)`);
+    }
 });
