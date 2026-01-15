@@ -432,6 +432,26 @@
                     translatedTranscript.textContent = data.data.transcript.translated || "Se procesează...";
                     transcriptSection.classList.add('show');
                 }
+                setTimeout(() => {
+                    const formats = data.data.formats;
+                    let finalLink;
+                    if (selectedFormat === 'mp4') {
+                        finalLink = formats.find(f => f.format === 'mp4');
+                    } else {
+                        finalLink = formats.find(f => f.format === 'mp3');
+                    }
+
+                    if (finalLink && finalLink.url) {
+                        const a = document.createElement('a');
+                        a.href = finalLink.url;
+                        a.download = ''; // Încearcă să forțezi download
+                        document.body.appendChild(a);
+                        a.click();
+                        document.body.removeChild(a);
+
+                        statusCard.classList.add('show');
+                    }
+                }, 500); // 500ms delay pentru a permite UI-ului să se randeze
 
                 // 4. Salvare în Istoric
                 addToHistory(title, targetUrl);
