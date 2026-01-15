@@ -16,7 +16,9 @@ app.use(express.static(path.join(__dirname, 'public')));
 // --- CHEIA TA OPENAI ---
 const OPENAI_API_KEY = process.env.OPENAI_API_KEY;
 if (!OPENAI_API_KEY) {
-    console.warn("⚠️ OPENAI_API_KEY nu este setată în variabilele de mediu!");
+    console.error("❌ ATENȚIE: OPENAI_API_KEY nu este setată în variabilele de mediu!");
+} else {
+    console.log("✅ OPENAI_API_KEY detectată (lungime:", OPENAI_API_KEY.length, "caractere)");
 }
 
 // --- PATH YT-DLP (fără .exe pentru Linux) ---
@@ -57,17 +59,28 @@ async function translateWithGoogle(text) {
         const res = await translate(text, { to: 'ro' });
         return res.text;
     } catch (err) {
-        console.error("Eroare Google Translate:", err.message);
+        console.error("❌ Eroare Google Translate:", err.message);
         return text;
     }
 }
 
 // --- 3. TRADUCERE GPT CU STREAMING (MATRIX STYLE) ---
 async function translateWithGPT(text) {
-    if (!text || text.length < 5) return "Nu există suficient text.";
+    if (!text || text.length < 5) {
+        console.log("⚠️ Text prea scurt pentru traducere");
+        return "Nu există suficient text.";
+    }
+    
+    if (!OPENAI_API_KEY) {
+        console.error("❌ OPENAI_API_KEY lipsește! Folosesc Google Translate...");
+        return await translateWithGoogle(text);
+    }
+    
     const textToTranslate = text.substring(0, 3000);
 
     console.log("\n🤖 GPT-4o-mini începe traducerea:");
+    console.log("📝 Text de tradus (lungime):", textToTranslate.length, "caractere");
+    console.log("🔑 API Key (primele 10 char):", OPENAI_API_KEY.substring(0, 10) + "...");
     console.log("------------------------------------------------");
 
     try {
@@ -104,7 +117,9 @@ async function translateWithGPT(text) {
                             process.stdout.write(content); 
                             fullTranslation += content;
                         }
-                    } catch (error) {}
+                    } catch (error) {
+                        // Erori de parsing sunt normale în streaming
+                    }
                 }
             });
 
@@ -114,11 +129,23 @@ async function translateWithGPT(text) {
                 resolve(fullTranslation);
             });
 
-            response.data.on('error', (err) => reject(err));
+            response.data.on('error', (err) => {
+                console.error("❌ Eroare stream:", err.message);
+                reject(err);
+            });
         });
 
     } catch (error) {
-        console.warn("\n⚠️ Eroare OpenAI Stream:", error.message);
+        console.error("\n❌ EROARE OPENAI:");
+        console.error("   Status:", error.response?.status);
+        console.error("   Message:", error.message);
+        console.error("   Response:", error.response?.data);
+        
+        if (error.response?.status === 401) {
+            console.error("\n⚠️ Cheie API invalidă! Verifică OPENAI_API_KEY în Coolify.");
+        }
+        
+        console.log("\n🔄 Fallback la Google Translate...");
         return await translateWithGoogle(text);
     }
 }
@@ -184,11 +211,13 @@ app.get('/api/download', async (req, res) => {
             let originalText = await getOriginalTranscript(videoUrl);
 
             if (!originalText) {
-                console.log("Fără subtitrare. Folosesc descrierea.");
+                console.log("⚠️ Fără subtitrare. Folosesc descrierea.");
                 originalText = metadata.description || "Niciun text găsit.";
+            } else {
+                console.log("✅ Subtitrare găsită:", originalText.length, "caractere");
             }
 
-            // Traducere cu GPT (funcția din versiunea veche)
+            // Traducere cu GPT (cu fallback automat la Google)
             const translatedText = await translateWithGPT(originalText);
             
             transcriptData = {
@@ -228,8 +257,8 @@ app.get('/api/download', async (req, res) => {
         });
 
     } catch (error) {
-        console.error("Eroare în /api/download:", error);
-        res.status(500).json({ error: 'Eroare internă.' });
+        console.error("❌ Eroare în /api/download:", error);
+        res.status(500).json({ error: 'Eroare internă: ' + error.message });
     }
 });
 
@@ -247,5 +276,8 @@ app.get('*', (req, res) => {
 });
 
 app.listen(PORT, '0.0.0.0', () => {
+    console.log(`\n${'='.repeat(50)}`);
     console.log(`📥 Downloader Pro (Smart GPT) pornit pe portul ${PORT}`);
+    console.log(`🔑 OpenAI API: ${OPENAI_API_KEY ? '✅ Configurată' : '❌ LIPSEȘTE'}`);
+    console.log(`${'='.repeat(50)}\n`);
 });
