@@ -5,10 +5,12 @@ const path = require('path');
 const fs = require('fs');
 const axios = require('axios');
 
-// AM SCOS IMPORTUL PENTRU GOOGLE TRANSLATE
-
 const app = express();
 const PORT = 3003;
+
+// --- CONFIGURARE DOMENIU PUBLIC ---
+// Acesta este domeniul pe care îl vor primi utilizatorii în link-urile de download
+const PUBLIC_DOMAIN = 'https://downloader.creatorsmart.ro';
 
 app.use(cors());
 app.use(express.json());
@@ -16,6 +18,11 @@ app.use(express.json());
 // --- CHEIA TA OPENAI ---
 const OPENAI_API_KEY = process.env.OPENAI_API_KEY;
 const YTDLP_PATH = path.join(__dirname, 'yt-dlp.exe');
+
+// --- RUTA ROOT (Ca să nu mai dea eroare "Cannot GET /") ---
+app.get('/', (req, res) => {
+    res.status(200).send('✅ Downloader API is running correctly on CreatorSmart!');
+});
 
 // --- DETECTARE PLATFORMĂ ---
 function detectPlatform(url) {
@@ -45,13 +52,12 @@ function cleanVttText(vttContent) {
     return cleanText.join(' ');
 }
 
-// --- 2. TRADUCERE GPT CU STREAMING (MATRIX STYLE) ---
+// --- 2. TRADUCERE GPT ---
 async function translateWithGPT(text) {
     if (!text || text.length < 5) return "Nu există suficient text.";
     const textToTranslate = text.substring(0, 3000);
 
     console.log("\n🤖 GPT-4o-mini începe traducerea:");
-    console.log("------------------------------------------------");
 
     try {
         const response = await axios.post('https://api.openai.com/v1/chat/completions', {
@@ -92,8 +98,7 @@ async function translateWithGPT(text) {
             });
 
             response.data.on('end', () => {
-                console.log("\n------------------------------------------------");
-                console.log("✅ Gata! Traducerea completă salvată.");
+                console.log("\n✅ Traducere completă.");
                 resolve(fullTranslation);
             });
 
@@ -102,7 +107,6 @@ async function translateWithGPT(text) {
 
     } catch (error) {
         console.warn("\n⚠️ Eroare OpenAI Stream:", error.message);
-        // Fallback: Returnăm textul original dacă GPT eșuează, deoarece Google Translate a fost scos.
         return `(Traducere eșuată - Text Original): ${text}`; 
     }
 }
@@ -162,13 +166,11 @@ app.get('/api/download', async (req, res) => {
         const metadata = await getYtMetadata(videoUrl);
         let transcriptData = null;
 
-        // PROCESĂM TRANSCRIPTUL DOAR PENTRU YOUTUBE
         if (platform === 'youtube') {
             console.log("📝 YouTube detectat - extrag transcript...");
             let originalText = await getOriginalTranscript(videoUrl);
 
             if (!originalText) {
-                console.log("Fără subtitrare. Folosesc descrierea.");
                 originalText = metadata.description || "Niciun text găsit.";
             }
 
@@ -182,14 +184,10 @@ app.get('/api/download', async (req, res) => {
             console.log(`⏩ ${platform} - skip transcript (doar download)`);
         }
 
-        // --- DINAMIC HOST URL ---
-        // Folosim req.headers.host pentru a genera link-ul corect indiferent dacă ești pe localhost sau IP public
-        const protocol = req.protocol; 
-        const host = req.headers.host; // Ex: localhost:3003 sau 192.168.1.X:3003 sau domeniu.ro
-
+        // --- FOLOSIM DOMENIUL PUBLIC CONFIGURAT SUS ---
         const formats = [
-            { quality: 'Video HD (MP4)', url: `${protocol}://${host}/api/stream?type=video&url=${encodeURIComponent(videoUrl)}` },
-            { quality: 'Audio Only (MP3)', url: `${protocol}://${host}/api/stream?type=audio&url=${encodeURIComponent(videoUrl)}` }
+            { quality: 'Video HD (MP4)', url: `${PUBLIC_DOMAIN}/api/stream?type=video&url=${encodeURIComponent(videoUrl)}` },
+            { quality: 'Audio Only (MP3)', url: `${PUBLIC_DOMAIN}/api/stream?type=audio&url=${encodeURIComponent(videoUrl)}` }
         ];
 
         res.json({
@@ -198,7 +196,7 @@ app.get('/api/download', async (req, res) => {
                 title: metadata.title,
                 duration: metadata.duration_string,
                 formats: formats,
-                transcript: transcriptData // Null pentru non-YouTube
+                transcript: transcriptData
             }
         });
 
@@ -216,8 +214,8 @@ app.get('/api/stream', (req, res) => {
     process.stdout.pipe(res);
 });
 
-// Ascultă pe toate interfețele de rețea (0.0.0.0) pentru acces din extern
+// Ascultă pe 0.0.0.0 (necesar pentru Coolify/Docker)
 app.listen(PORT, '0.0.0.0', () => {
-    console.log(`📥 Downloader Pro (Host Mode) pornit pe portul ${PORT}`);
-    console.log(`🌍 Accesibil extern via IP-ul serverului.`);
+    console.log(`📥 Downloader Pro is running on internal port ${PORT}`);
+    console.log(`🌍 Public Domain: ${PUBLIC_DOMAIN}`);
 });
