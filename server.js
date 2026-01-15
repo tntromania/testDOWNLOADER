@@ -4,7 +4,6 @@ const { spawn } = require('child_process');
 const path = require('path');
 const fs = require('fs');
 const axios = require('axios');
-const { translate } = require('@vitalets/google-translate-api');
 
 const app = express();
 const PORT = 3000;
