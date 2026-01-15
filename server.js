@@ -11,53 +11,52 @@ const PORT = 3003;
 
 app.use(cors());
 app.use(express.json());
-// Servim fișierele statice (index.html, css) din folderul curent sau public
-app.use(express.static(path.join(__dirname, 'public'))); 
-// Fallback pentru root dacă index.html e în același folder cu server.js
+app.use(express.static(path.join(__dirname, 'public')));
 app.use(express.static(__dirname));
 
 const OPENAI_API_KEY = process.env.OPENAI_API_KEY;
-// În containerul Docker instalăm yt-dlp în /usr/local/bin/
 const YTDLP_PATH = '/usr/local/bin/yt-dlp';
 const COOKIES_PATH = path.join(__dirname, 'cookies.txt');
 
-// --- HELPER: Argumente standard pentru yt-dlp (Anti-Block) ---
-// --- HELPER: Argumente standard pentru yt-dlp (Anti-Block 2024) ---
-function getYtDlpArgs() {
+// --- 1. SETĂRI ANTI-BOT (Doar pentru Metadata/Transcript) ---
+function getScrapingArgs() {
     const args = [
         '--no-warnings',
         '--no-check-certificates',
         '--force-ipv4',
-        // Update la un User Agent modern (Chrome 120+)
         '--user-agent', 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
         '--referer', 'https://www.youtube.com/',
-        // Adăugăm sleep pentru a nu bombarda serverul (pare comportament uman)
-        '--sleep-requests', '1',
-        '--sleep-interval', '2',
-        '--sleep-subtitles', '1'
+        // Păstrăm sleep DOAR la interogări mici ca să nu luăm ban
+        '--sleep-requests', '1', 
     ];
-    
-    if (fs.existsSync(COOKIES_PATH)) {
-        args.push('--cookies', COOKIES_PATH);
-    }
+    if (fs.existsSync(COOKIES_PATH)) args.push('--cookies', COOKIES_PATH);
     return args;
 }
 
-// --- CURĂȚARE TEXT VTT ---
+// --- 2. SETĂRI STREAMING (Viteză Maximă - Fără Sleep) ---
+function getStreamingArgs() {
+    const args = [
+        '--no-warnings',
+        '--no-check-certificates',
+        '--force-ipv4',
+        // Buffer mai mare pentru a preveni deconectările
+        '--buffer-size', '16K',
+        '--user-agent', 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+    ];
+    // La streaming folosim cookies doar dacă există, dar NU punem sleep!
+    if (fs.existsSync(COOKIES_PATH)) args.push('--cookies', COOKIES_PATH);
+    return args;
+}
+
+// --- 3. CURĂȚARE TEXT ---
 function cleanVttText(vttContent) {
     if (!vttContent) return "";
     const lines = vttContent.split('\n');
     let cleanText = [];
     let seenLines = new Set();
-
     lines.forEach(line => {
         line = line.trim();
-        if (!line || line.startsWith('WEBVTT') || line.includes('-->') || 
-            /^\d+$/.test(line) || line.startsWith('Kind:') || 
-            line.startsWith('Language:') || line.startsWith('NOTE') || 
-            line.startsWith('Style:')) {
-            return;
-        }
+        if (!line || line.startsWith('WEBVTT') || line.includes('-->') || /^\d+$/.test(line) || line.startsWith('Kind:') || line.startsWith('Language:') || line.startsWith('NOTE') || line.startsWith('Style:')) return;
         line = line.replace(/<[^>]*>/g, '');
         if (!seenLines.has(line) && line.length > 1) {
             seenLines.add(line);
@@ -67,15 +66,13 @@ function cleanVttText(vttContent) {
     return cleanText.join(' ');
 }
 
-// --- EXTRAGERE TRANSCRIPT ---
+// --- 4. EXTRAGERE TRANSCRIPT ---
 async function getOriginalTranscript(url) {
     const uniqueId = Date.now();
     const outputTemplate = path.join(__dirname, `trans_${uniqueId}`);
-
     return new Promise((resolve) => {
-        // Combinăm argumentele de bază cu cele specifice pentru subtitrări
         const args = [
-            ...getYtDlpArgs(),
+            ...getScrapingArgs(),
             '--skip-download',
             '--write-sub', '--write-auto-sub',
             '--sub-lang', 'en',
@@ -83,93 +80,71 @@ async function getOriginalTranscript(url) {
             '--output', outputTemplate,
             url
         ];
-
-        console.log(`[DEBUG] Comandă transcript: ${YTDLP_PATH} ${args.join(' ')}`);
         const process = spawn(YTDLP_PATH, args);
-
-        process.on('close', (code) => {
-            const possibleFiles = [
-                `${outputTemplate}.en.vtt`,
-                `${outputTemplate}.en-orig.vtt`
-            ];
+        process.on('close', () => {
+            const possibleFiles = [`${outputTemplate}.en.vtt`, `${outputTemplate}.en-orig.vtt`];
             let foundFile = possibleFiles.find(f => fs.existsSync(f));
-
             if (foundFile) {
                 try {
                     const content = fs.readFileSync(foundFile, 'utf8');
                     const text = cleanVttText(content);
                     fs.unlinkSync(foundFile);
                     resolve(text);
-                } catch (e) {
-                    console.error("Eroare citire fișier subtitrare:", e);
-                    resolve(null);
-                }
-            } else {
-                console.warn("Nu s-a generat niciun fișier de subtitrare.");
-                resolve(null);
-            }
+                } catch (e) { resolve(null); }
+            } else { resolve(null); }
         });
     });
 }
 
-// --- TRADUCERE (GOOGLE / GPT) ---
+// --- 5. TRADUCERE ---
 async function translateText(text) {
     if (!text || text.length < 5) return "Nu există suficient text.";
-
-    // 1. Încercăm GPT dacă avem cheie
     if (OPENAI_API_KEY) {
         try {
-            console.log("🤖 GPT-4o-mini începe traducerea...");
             const response = await axios.post('https://api.openai.com/v1/chat/completions', {
                 model: "gpt-4o-mini",
                 messages: [
-                    { "role": "system", "content": "Ești un traducător profesionist. Tradu textul următor în limba Română. Păstrează sensul exact." },
+                    { "role": "system", "content": "Ești un traducător profesionist. Tradu textul în Română. Păstrează sensul exact." },
                     { "role": "user", "content": text.substring(0, 4000) }
                 ],
                 temperature: 0.3
-            }, {
-                headers: { 'Authorization': `Bearer ${OPENAI_API_KEY}` }
-            });
+            }, { headers: { 'Authorization': `Bearer ${OPENAI_API_KEY}` } });
             return response.data.choices[0].message.content;
-        } catch (error) {
-            console.warn("⚠️ Eroare OpenAI, trec la Google:", error.message);
-        }
+        } catch (error) { console.warn("GPT Error, fallback Google"); }
     }
-
-    // 2. Fallback Google Translate
     try {
-        console.log("🔄 Google Translate...");
         const res = await translate(text.substring(0, 4500), { to: 'ro' });
         return res.text;
-    } catch (err) {
-        return "Traducere momentan indisponibilă.";
+    } catch (err) { return "Traducere indisponibilă."; }
+}
+
+// --- 6. FALLBACK TITLU (Soluția Salvatoare) ---
+async function getVideoTitleFallback(url) {
+    try {
+        // Folosim oEmbed API oficial de la YouTube (nu cere cookies, nu e blocat)
+        const response = await axios.get(`https://www.youtube.com/oembed?url=${url}&format=json`);
+        return response.data.title;
+    } catch (e) {
+        return null;
     }
 }
 
-// --- METADATA VIDEO ---
 function getYtMetadata(url) {
     return new Promise((resolve) => {
-        const args = [
-            ...getYtDlpArgs(),
-            '--dump-json',
-            url
-        ];
-        
+        const args = [...getScrapingArgs(), '--dump-json', url];
         const process = spawn(YTDLP_PATH, args);
         let buffer = '';
-        
         process.stdout.on('data', d => buffer += d);
-        process.stderr.on('data', d => console.error(`[YTDLP ERR]: ${d}`));
-
-        process.on('close', () => {
+        process.on('close', async () => {
             try {
-                if(!buffer) throw new Error("Buffer gol");
+                if(!buffer) throw new Error("Empty buffer");
                 resolve(JSON.parse(buffer));
             } catch (e) {
-                console.error("Eroare parsare JSON Metadata:", e.message);
-                // Returnăm un obiect minim ca să nu crape frontend-ul
+                console.log("⚠️ Metadata blocat de yt-dlp. Încerc metoda alternativă...");
+                // Dacă yt-dlp eșuează, luăm titlul prin API-ul public
+                const fallbackTitle = await getVideoTitleFallback(url);
                 resolve({ 
-                    title: "Titlu Indisponibil (Verifică Cookies)", 
+                    title: fallbackTitle || "Video YouTube (Titlu Protejat)", 
                     description: "", 
                     duration_string: "--:--" 
                 });
@@ -181,36 +156,27 @@ function getYtMetadata(url) {
 // --- ENDPOINT PRINCIPAL ---
 app.get('/api/download', async (req, res) => {
     const videoUrl = req.query.url;
-    console.log(`\n[INFO] Procesez: ${videoUrl}`);
-
     if (!videoUrl) return res.status(400).json({ error: 'URL lipsă' });
 
     try {
-        // 1. Metadata
+        // Luăm metadatele (cu fallback dacă eșuează)
         const metadata = await getYtMetadata(videoUrl);
-        console.log(`✓ Titlu găsit: ${metadata.title}`);
-
-        // 2. Transcript
-        console.log("-> Caut transcript...");
+        
+        // Luăm transcriptul
         let originalText = await getOriginalTranscript(videoUrl);
-
         if (!originalText && metadata.description) {
-            console.log("-> Nu am găsit subtitrare, folosesc descrierea.");
             originalText = metadata.description.replace(/https?:\/\/\S+/g, '');
         }
 
-        // 3. Traducere
+        // Traducem
         let translatedText = await translateText(originalText);
 
-        // 4. Construire răspuns
         const qualities = ['360', '480', '720', '1080'];
         const formats = qualities.map(q => ({
-            quality: q + 'p',
-            format: 'mp4',
+            quality: q + 'p', format: 'mp4',
             url: `/api/stream?url=${encodeURIComponent(videoUrl)}&type=video`,
             hasAudio: true, hasVideo: true
         }));
-
         formats.push({
             quality: '192', format: 'mp3',
             url: `/api/stream?url=${encodeURIComponent(videoUrl)}&type=audio`,
@@ -229,14 +195,12 @@ app.get('/api/download', async (req, res) => {
                 }
             }
         });
-
     } catch (error) {
-        console.error("❌ Eroare server:", error);
-        res.status(500).json({ error: 'Eroare internă la procesare.' });
+        res.status(500).json({ error: 'Eroare internă.' });
     }
 });
 
-// --- ENDPOINT STREAMING ---
+// --- ENDPOINT STREAMING RAPID ---
 app.get('/api/stream', (req, res) => {
     const videoUrl = req.query.url;
     const type = req.query.type;
@@ -245,8 +209,9 @@ app.get('/api/stream', (req, res) => {
     res.setHeader('Content-Disposition', `attachment; filename="${isAudio ? 'audio.mp3' : 'video.mp4'}"`);
     res.setHeader('Content-Type', isAudio ? 'audio/mpeg' : 'video/mp4');
 
+    // Folosim argumentele FĂRĂ sleep pentru viteză
     const args = [
-        ...getYtDlpArgs(), // Folosim aceleași argumente cu cookies și aici!
+        ...getStreamingArgs(), 
         '-o', '-',
         '-f', isAudio ? 'bestaudio' : 'best',
         videoUrl
@@ -254,14 +219,14 @@ app.get('/api/stream', (req, res) => {
 
     const streamProcess = spawn(YTDLP_PATH, args);
     streamProcess.stdout.pipe(res);
-    streamProcess.stderr.on('data', d => console.log(`Stream stderr: ${d}`));
+    
+    // Dacă clientul închide conexiunea, omorâm procesul ca să nu rămână agățat
+    req.on('close', () => {
+        streamProcess.kill();
+    });
 });
 
 app.listen(PORT, '0.0.0.0', () => {
-    console.log(`🚀 Server pornit pe portul ${PORT}`);
-    if (fs.existsSync(COOKIES_PATH)) {
-        console.log("🍪 Cookies.txt detectat și încărcat!");
-    } else {
-        console.warn("⚠️  ATENȚIE: cookies.txt lipsește! Descărcările pot eșua pe server.");
-    }
+    console.log(`🚀 Server Rapid pornit pe ${PORT}`);
+    if (fs.existsSync(COOKIES_PATH)) console.log("🍪 Cookies active.");
 });
