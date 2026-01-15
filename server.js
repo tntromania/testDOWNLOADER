@@ -4,422 +4,172 @@ const { spawn } = require('child_process');
 const path = require('path');
 const fs = require('fs');
 const axios = require('axios');
-const { translate } = require('@vitalets/google-translate-api');
 
 const app = express();
 const PORT = 3003;
 
 app.use(cors());
 app.use(express.json());
-app.use(express.static(path.join(__dirname, 'public')));
-app.use(express.static(__dirname));
 
+// Pe Coolify/Linux, yt-dlp trebuie să fie instalat în sistem (PATH)
+const YTDLP_CMD = 'yt-dlp'; 
 const OPENAI_API_KEY = process.env.OPENAI_API_KEY;
-const YTDLP_PATH = '/usr/local/bin/yt-dlp';
-const COOKIES_PATH = path.join(__dirname, 'cookies.txt');
 
-// ==========================================
-// Funcția Helper Anti-Block
-// ==========================================
-function getYtDlpArgs() {
-    const args = [
+// --- 1. CONFIGURARE ANTI-BLOCK ---
+function getYtArgs() {
+    return [
         '--no-warnings',
         '--no-check-certificates',
         '--force-ipv4',
-        '--user-agent', 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
-        '--referer', 'https://www.youtube.com/',
-        '--sleep-requests', '1',
-        '--sleep-interval', '2',
-        '--sleep-subtitles', '1'
+        '--user-agent', 'Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+        '--sleep-requests', '1'
     ];
-    
-    if (fs.existsSync(COOKIES_PATH)) {
-        args.push('--cookies', COOKIES_PATH);
-    }
-    return args;
 }
 
-// --- VALIDARE PLATFORMĂ ---
-function detectPlatform(url) {
-    const urlLower = url.toLowerCase();
-    if (urlLower.includes('youtube.com') || urlLower.includes('youtu.be')) return 'youtube';
-    if (urlLower.includes('tiktok.com')) return 'tiktok';
-    if (urlLower.includes('instagram.com')) return 'instagram';
-    if (urlLower.includes('facebook.com') || urlLower.includes('fb.watch') || urlLower.includes('fb.com')) return 'facebook';
-    return 'unknown';
-}
-
-// --- CURĂȚARE TEXT VTT ---
-function cleanVttText(vttContent) {
-    if (!vttContent) return "";
-    const lines = vttContent.split('\n');
-    let cleanText = [];
-    let seenLines = new Set();
+// --- 2. CURĂȚARE VTT ---
+function cleanVtt(text) {
+    if (!text) return "";
+    const lines = text.split('\n');
+    const uniqueLines = new Set();
+    const result = [];
 
     lines.forEach(line => {
         line = line.trim();
-        if (!line || line.startsWith('WEBVTT') || line.includes('-->') || /^\d+$/.test(line) || 
-            line.startsWith('Kind:') || line.startsWith('Language:') || line.startsWith('Tip:') || 
-            line.startsWith('Limbă:') || line.startsWith('Style:')) {
-            return;
-        }
-        line = line.replace(/<[^>]*>/g, '');
-        if (!seenLines.has(line) && line.length > 1) {
-            seenLines.add(line);
-            cleanText.push(line);
+        // Ignoră metadata, timestamp-uri și linii goale
+        if (!line || line.includes('-->') || line.startsWith('WEBVTT') || /^\d+$/.test(line) || line.startsWith('Kind:') || line.startsWith('Language:')) return;
+        
+        line = line.replace(/<[^>]*>/g, ''); // Scoate tag-uri HTML
+        
+        if (!uniqueLines.has(line) && line.length > 1) {
+            uniqueLines.add(line);
+            result.push(line);
         }
     });
-    return cleanText.join(' ');
+    return result.join(' ');
 }
 
-// --- TRADUCERE GPT-4o-mini ---
-async function translateWithAI(text) {
-    if (!text || text.length < 5) return "Nu există suficient text.";
+// --- 3. EXTRAGERE TRANSCRIPT (Metoda Fișier Temporar) ---
+async function getTranscript(url) {
+    const id = Date.now();
+    const tempFile = path.join(__dirname, `sub_${id}`);
     
-    console.log("\n--- [AI DEBUG] Începe procesul de traducere ---");
-    if (OPENAI_API_KEY) {
-        try {
-            const response = await axios.post('https://api.openai.com/v1/chat/completions', {
-                model: "gpt-4o-mini",
-                messages: [
-                    { "role": "system", "content": "Ești un traducător profesionist. Tradu textul în limba Română, natural și fluent." },
-                    { "role": "user", "content": text.substring(0, 4000) }
-                ],
-                temperature: 0.3
-            }, { headers: { 'Authorization': `Bearer ${OPENAI_API_KEY}` } });
+    // Comandă specifică pentru extragere subtitrare EN
+    const args = [
+        ...getYtArgs(),
+        '--skip-download',
+        '--write-sub', '--write-auto-sub',
+        '--sub-lang', 'en',
+        '--convert-subs', 'vtt',
+        '--output', tempFile,
+        url
+    ];
 
-            return response.data.choices[0].message.content;
-        } catch (e) { 
-            console.error("[AI ERROR] GPT eșuat:", e.message);
-        }
-    }
-    try {
-        const res = await translate(text.substring(0, 4500), { to: 'ro' });
-        return res.text;
-    } catch (err) { return "Traducere indisponibilă."; }
-}
+    return new Promise(resolve => {
+        const proc = spawn(YTDLP_CMD, args);
+        
+        proc.on('close', () => {
+            // Verifică variantele de nume posibile
+            const files = [`${tempFile}.en.vtt`, `${tempFile}.en-orig.vtt`, `${tempFile}.en-auto.vtt`];
+            const found = files.find(f => fs.existsSync(f));
 
-// ==========================================
-// FUNCȚIE ÎMBUNĂTĂȚITĂ: Listare subtitrări disponibile
-// ==========================================
-async function listAvailableSubtitles(url) {
-    return new Promise((resolve) => {
-        const args = [
-            ...getYtDlpArgs(),
-            '--list-subs',
-            '--skip-download',
-            url
-        ];
-
-        const proc = spawn(YTDLP_PATH, args);
-        let output = '';
-        let errorOutput = '';
-
-        proc.stdout.on('data', (data) => {
-            output += data.toString();
-        });
-
-        proc.stderr.on('data', (data) => {
-            errorOutput += data.toString();
-        });
-
-        proc.on('close', (code) => {
-            const allOutput = output + errorOutput;
-            
-            // Extrage limbile disponibile din output
-            const languages = [];
-            const lines = allOutput.split('\n');
-            
-            for (let line of lines) {
-                // Caută linii care conțin coduri de limbă (ex: "en", "en-US", "ro", etc.)
-                const match = line.match(/([a-z]{2}(?:-[A-Z]{2})?)\s+(?:\(.*?\))?\s*(auto-generated|manual)?/i);
-                if (match) {
-                    const langCode = match[1].toLowerCase();
-                    const isAuto = match[2] && match[2].toLowerCase().includes('auto');
-                    languages.push({ code: langCode, auto: isAuto });
-                }
-            }
-
-            // Elimină duplicatele
-            const uniqueLangs = [];
-            const seen = new Set();
-            for (const lang of languages) {
-                const key = lang.code;
-                if (!seen.has(key)) {
-                    seen.add(key);
-                    uniqueLangs.push(lang);
-                }
-            }
-
-            console.log(`[SUBTITLES] Limbile găsite:`, uniqueLangs.map(l => `${l.code}${l.auto ? ' (auto)' : ''}`).join(', '));
-            resolve(uniqueLangs);
-        });
-    });
-}
-
-// ==========================================
-// FUNCȚIE ÎMBUNĂTĂȚITĂ: Extragere transcript cu mai multe încercări
-// ==========================================
-async function getOriginalTranscript(url) {
-    const uniqueId = Date.now();
-    const outputTemplate = path.join(__dirname, `trans_${uniqueId}`);
-
-    console.log(`\n--- [TRANSCRIPT DEBUG] Se caută transcript pentru: ${url} ---`);
-
-    // PASUL 1: Verifică ce subtitrări sunt disponibile
-    const availableLangs = await listAvailableSubtitles(url);
-    
-    if (availableLangs.length === 0) {
-        console.log("[TRANSCRIPT] Nu s-au găsit subtitrări disponibile");
-        return null;
-    }
-
-    // PASUL 2: Încearcă să extragă subtitrările în ordinea priorității
-    // Prioritate: en (manual) > en (auto) > orice altă limbă > ro
-    const priorityOrder = ['en', 'en-US', 'en-GB', 'ro', 'ro-RO'];
-    
-    // Adaugă toate limbile disponibile la listă
-    const allLangsToTry = [];
-    for (const lang of priorityOrder) {
-        if (availableLangs.find(l => l.code.startsWith(lang.split('-')[0]))) {
-            allLangsToTry.push(lang);
-        }
-    }
-    
-    // Adaugă și celelalte limbi disponibile
-    for (const lang of availableLangs) {
-        if (!allLangsToTry.includes(lang.code) && !allLangsToTry.some(l => l.startsWith(lang.code.split('-')[0]))) {
-            allLangsToTry.push(lang.code);
-        }
-    }
-
-    // Dacă nu am găsit nimic, încercăm cu "en" și "auto" ca fallback
-    if (allLangsToTry.length === 0) {
-        allLangsToTry.push('en', 'en.*');
-    }
-
-    console.log(`[TRANSCRIPT] Se încearcă extragerea cu limbile: ${allLangsToTry.join(', ')}`);
-
-    // Încearcă fiecare limbă până găsește una care funcționează
-    for (const langCode of allLangsToTry) {
-        try {
-            const args = [
-                ...getYtDlpArgs(),
-                '--skip-download',
-                '--write-auto-sub',      // Include subtitrări auto-generate
-                '--write-sub',            // Include subtitrări manuale
-                '--sub-lang', langCode,   // Limba specifică
-                '--convert-subs', 'vtt',   // Convertește în VTT
-                '--output', outputTemplate,
-                url
-            ];
-
-            const result = await new Promise((resolve) => {
-                const proc = spawn(YTDLP_PATH, args);
-                let errorOutput = '';
-
-                proc.stderr.on('data', (data) => {
-                    errorOutput += data.toString();
-                });
-
-                proc.on('close', (code) => {
-                    // Caută fișierul VTT generat
-                    const files = fs.readdirSync(__dirname);
-                    const foundFile = files.find(f => 
-                        f.startsWith(`trans_${uniqueId}`) && 
-                        (f.endsWith('.vtt') || f.endsWith('.en.vtt') || f.endsWith(`.${langCode}.vtt`))
-                    );
-
-                    if (foundFile) {
-                        const filePath = path.join(__dirname, foundFile);
-                        try {
-                            const content = fs.readFileSync(filePath, 'utf8');
-                            const text = cleanVttText(content);
-                            
-                            // Șterge fișierul
-                            try {
-                                fs.unlinkSync(filePath);
-                            } catch (e) {}
-
-                            if (text.length > 10) {
-                                console.log(`[TRANSCRIPT] ✅ Succes cu limba: ${langCode}, text length: ${text.length}`);
-                                resolve(text);
-                            } else {
-                                console.log(`[TRANSCRIPT] ⚠️ Text prea scurt cu limba: ${langCode}`);
-                                resolve(null);
-                            }
-                        } catch (e) {
-                            console.log(`[TRANSCRIPT] ❌ Eroare la citirea fișierului: ${e.message}`);
-                            resolve(null);
-                        }
-                    } else {
-                        console.log(`[TRANSCRIPT] ❌ Nu s-a găsit fișier VTT pentru limba: ${langCode}`);
-                        resolve(null);
-                    }
-                });
-            });
-
-            if (result) {
-                return result;
-            }
-        } catch (e) {
-            console.log(`[TRANSCRIPT] ❌ Eroare la extragerea cu limba ${langCode}: ${e.message}`);
-            continue;
-        }
-    }
-
-    // PASUL 3: Fallback - încearcă fără specificarea limbii (ia prima disponibilă)
-    console.log(`[TRANSCRIPT] 🔄 Fallback: încercare fără specificarea limbii`);
-    try {
-        const args = [
-            ...getYtDlpArgs(),
-            '--skip-download',
-            '--write-auto-sub',
-            '--write-sub',
-            '--convert-subs', 'vtt',
-            '--output', outputTemplate,
-            url
-        ];
-
-        const result = await new Promise((resolve) => {
-            const proc = spawn(YTDLP_PATH, args);
-            
-            proc.on('close', () => {
-                const files = fs.readdirSync(__dirname);
-                const foundFile = files.find(f => 
-                    f.startsWith(`trans_${uniqueId}`) && f.endsWith('.vtt')
-                );
-
-                if (foundFile) {
-                    const filePath = path.join(__dirname, foundFile);
-                    try {
-                        const content = fs.readFileSync(filePath, 'utf8');
-                        const text = cleanVttText(content);
-                        
-                        try {
-                            fs.unlinkSync(filePath);
-                        } catch (e) {}
-
-                        if (text.length > 10) {
-                            console.log(`[TRANSCRIPT] ✅ Succes cu fallback, text length: ${text.length}`);
-                            resolve(text);
-                        } else {
-                            resolve(null);
-                        }
-                    } catch (e) {
-                        resolve(null);
-                    }
-                } else {
-                    resolve(null);
-                }
-            });
-        });
-
-        if (result) {
-            return result;
-        }
-    } catch (e) {
-        console.log(`[TRANSCRIPT] ❌ Eroare la fallback: ${e.message}`);
-    }
-
-    console.log(`[TRANSCRIPT] ❌ Nu s-a putut extrage transcript-ul`);
-    return null;
-}
-
-// ==========================================
-// getYtMetadata cu args noi
-// ==========================================
-async function getYtMetadata(url) {
-    try {
-        const oembed = await axios.get(`https://www.youtube.com/oembed?url=${url}&format=json`);
-        return { title: oembed.data.title };
-    } catch (e) {
-        return new Promise((resolve) => {
-            const args = [...getYtDlpArgs(), '--dump-json', '--no-warnings', url];
-            const proc = spawn(YTDLP_PATH, args);
-            let buf = '';
-            proc.stdout.on('data', d => buf += d);
-            proc.on('close', () => {
-                try { 
-                    const data = JSON.parse(buf);
-                    resolve({ title: data.title || "Video" }); 
-                } catch (e) { resolve({ title: "Video" }); }
-            });
-        });
-    }
-}
-
-// --- ENDPOINT PRINCIPAL ---
-app.get('/api/download', async (req, res) => {
-    const videoUrl = req.query.url;
-    const requestedPlatform = req.query.platform || 'youtube';
-    if (!videoUrl) return res.status(400).json({ error: 'URL lipsă' });
-
-    const detectedPlatform = detectPlatform(videoUrl);
-    if (detectedPlatform !== requestedPlatform) {
-        return res.status(400).json({ error: `URL incorect! Ai selectat ${requestedPlatform.toUpperCase()} dar link-ul este de la ${detectedPlatform.toUpperCase()}.` });
-    }
-
-    try {
-        const metadata = await getYtMetadata(videoUrl);
-        let transcriptData = null;
-
-        if (detectedPlatform === 'youtube') {
-            console.log(`\n=== [API] Începe extragerea transcript pentru YouTube ===`);
-            const originalText = await getOriginalTranscript(videoUrl);
-            
-            if (originalText && originalText.length > 10) {
-                console.log(`[API] ✅ Transcript extras: ${originalText.length} caractere`);
-                const translatedText = await translateWithAI(originalText);
-                transcriptData = {
-                    original: originalText.substring(0, 3000),
-                    translated: translatedText
-                };
-                console.log(`[API] ✅ Traducere completă`);
+            if (found) {
+                try {
+                    const content = fs.readFileSync(found, 'utf8');
+                    fs.unlinkSync(found); // Șterge fișierul imediat
+                    resolve(cleanVtt(content));
+                } catch (e) { resolve(null); }
             } else {
-                console.log(`[API] ⚠️ Nu s-a putut extrage transcript-ul`);
+                resolve(null);
             }
-        }
+        });
+    });
+}
 
-        const formats = ['360', '480', '720', '1080'].map(q => ({
-            quality: q + 'p', format: 'mp4',
-            url: `/api/stream?url=${encodeURIComponent(videoUrl)}&type=video`
-        }));
-        formats.push({ quality: '192', format: 'mp3', url: `/api/stream?url=${encodeURIComponent(videoUrl)}&type=audio` });
+// --- 4. TRADUCERE GPT ---
+async function translateGPT(text) {
+    if (!text || !OPENAI_API_KEY) return null;
+    try {
+        const resp = await axios.post('https://api.openai.com/v1/chat/completions', {
+            model: "gpt-4o-mini",
+            messages: [
+                { role: "system", content: "Traducere în română. Doar textul, fără explicații." },
+                { role: "user", content: text.substring(0, 5000) }
+            ]
+        }, { headers: { Authorization: `Bearer ${OPENAI_API_KEY}` } });
+        return resp.data.choices[0].message.content;
+    } catch (e) {
+        console.error("Eroare GPT:", e.message);
+        return "Eroare la traducere.";
+    }
+}
+
+// --- 5. METADATA ---
+function getMetadata(url) {
+    return new Promise(resolve => {
+        let data = '';
+        const proc = spawn(YTDLP_CMD, [...getYtArgs(), '--dump-json', url]);
+        proc.stdout.on('data', d => data += d);
+        proc.on('close', () => {
+            try { resolve(JSON.parse(data)); } 
+            catch { resolve({ title: "Video", description: "" }); }
+        });
+    });
+}
+
+// --- ROUTES ---
+
+app.get('/api/download', async (req, res) => {
+    const { url } = req.query;
+    if (!url) return res.status(400).json({ error: 'URL lipsă' });
+
+    console.log(`Processing: ${url}`);
+
+    try {
+        // 1. Metadata & Transcript
+        const meta = await getMetadata(url);
+        let text = await getTranscript(url);
+
+        // Fallback la descriere dacă nu e transcript
+        if (!text) text = (meta.description || "").replace(/https?:\/\/\S+/g, '');
+
+        // 2. Traducere
+        const translated = (text && text.length > 5) ? await translateGPT(text) : "Lipsă text.";
+
+        // 3. Link-uri stream
+        const host = `${req.protocol}://${req.get('host')}`;
+        const makeLink = (type) => `${host}/api/stream?url=${encodeURIComponent(url)}&type=${type}`;
 
         res.json({
             status: 'ok',
             data: {
-                title: metadata.title,
-                platform: detectedPlatform,
-                formats: formats,
-                transcript: transcriptData || { original: null, translated: null }
+                title: meta.title,
+                formats: [
+                    { quality: 'Video (Best)', url: makeLink('video') },
+                    { quality: 'Audio (MP3)', url: makeLink('audio') }
+                ],
+                transcript: {
+                    original: text ? text.substring(0, 3000) : null,
+                    translated: translated
+                }
             }
         });
-    } catch (e) { 
-        console.error('[API ERROR]', e);
-        res.status(500).json({ error: 'Eroare procesare.' }); 
+    } catch (e) {
+        res.status(500).json({ error: 'Server Error' });
     }
 });
 
-// ==========================================
-// Streaming cu args noi
-// ==========================================
 app.get('/api/stream', (req, res) => {
-    const isAudio = req.query.type === 'audio';
-    res.setHeader('Content-Disposition', `attachment; filename="${isAudio ? 'audio.mp3' : 'video.mp4'}"`);
+    const { url, type } = req.query;
+    const isAudio = type === 'audio';
     
-    const baseArgs = getYtDlpArgs().filter(arg => !arg.includes('sleep'));
-    const args = [
-        ...baseArgs,
-        '-o', '-', 
-        '-f', isAudio ? 'bestaudio' : 'best', 
-        req.query.url
-    ];
+    res.setHeader('Content-Type', isAudio ? 'audio/mpeg' : 'video/mp4');
+    res.setHeader('Content-Disposition', `attachment; filename="${isAudio ? 'audio.mp3' : 'video.mp4'}"`);
 
-    const proc = spawn(YTDLP_PATH, args);
+    const args = [...getYtArgs(), '-o', '-', '-f', isAudio ? 'bestaudio' : 'best', url];
+    const proc = spawn(YTDLP_CMD, args);
+    
     proc.stdout.pipe(res);
     req.on('close', () => proc.kill());
 });
 
-app.listen(PORT, '0.0.0.0', () => console.log(`🚀 Server pornit pe ${PORT}`));
+app.listen(PORT, '0.0.0.0', () => console.log(`Coolify Server running on port ${PORT}`));
