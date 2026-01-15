@@ -22,16 +22,21 @@ const YTDLP_PATH = '/usr/local/bin/yt-dlp';
 const COOKIES_PATH = path.join(__dirname, 'cookies.txt');
 
 // --- HELPER: Argumente standard pentru yt-dlp (Anti-Block) ---
+// --- HELPER: Argumente standard pentru yt-dlp (Anti-Block 2024) ---
 function getYtDlpArgs() {
     const args = [
         '--no-warnings',
         '--no-check-certificates',
         '--force-ipv4',
-        '--user-agent', 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36',
-        '--referer', 'https://www.youtube.com/'
+        // Update la un User Agent modern (Chrome 120+)
+        '--user-agent', 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+        '--referer', 'https://www.youtube.com/',
+        // Adăugăm sleep pentru a nu bombarda serverul (pare comportament uman)
+        '--sleep-requests', '1',
+        '--sleep-interval', '2',
+        '--sleep-subtitles', '1'
     ];
     
-    // Dacă există cookies.txt, îl folosim! CRUCIAL PENTRU DOMENIU/VPS
     if (fs.existsSync(COOKIES_PATH)) {
         args.push('--cookies', COOKIES_PATH);
     }
