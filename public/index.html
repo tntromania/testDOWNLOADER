@@ -3,250 +3,443 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Universal Downloader Pro</title>
-    <link rel="preconnect" href="https://fonts.googleapis.com">
-    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-    <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;500;700;800&display=swap" rel="stylesheet">
-
+    <title>Universal Downloader & AI Translator</title>
     <style>
-        /* --- RESET & BASE --- */
-        * { margin: 0; padding: 0; box-sizing: border-box; }
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+        }
 
         body {
-            font-family: 'Outfit', sans-serif;
-            background-color: #0f172a;
-            color: #fff;
+            background: linear-gradient(135deg, #1a1a2e 0%, #16213e 100%);
             min-height: 100vh;
             display: flex;
             justify-content: center;
             align-items: center;
             padding: 20px;
-            overflow-x: hidden;
-            transition: background-color 0.5s ease;
         }
 
-        /* --- BACKGROUND ANIMATION --- */
-        body::before {
-            content: '';
-            position: fixed;
-            top: -50%; left: -50%; width: 200%; height: 200%;
-            background: radial-gradient(circle, var(--glow-1, rgba(76, 29, 149, 0.4)) 0%, rgba(15, 23, 42, 0) 50%),
-            radial-gradient(circle, var(--glow-2, rgba(56, 189, 248, 0.2)) 0%, rgba(15, 23, 42, 0) 60%);
-            background-size: 100% 100%;
-            animation: moveBackground 15s ease-in-out infinite alternate;
-            z-index: -1;
-            transition: 1s ease;
-        }
-
-        body.theme-youtube::before { --glow-1: rgba(220, 38, 38, 0.3); --glow-2: rgba(15, 23, 42, 0); }
-        body.theme-tiktok::before { --glow-1: rgba(34, 211, 238, 0.2); --glow-2: rgba(232, 28, 255, 0.2); }
-        body.theme-instagram::before { --glow-1: rgba(245, 158, 11, 0.2); --glow-2: rgba(217, 70, 239, 0.2); }
-        body.theme-facebook::before { --glow-1: rgba(37, 99, 235, 0.3); --glow-2: rgba(15, 23, 42, 0); }
-
-        @keyframes moveBackground {
-            0% { transform: translate(0, 0); }
-            100% { transform: translate(-50px, -50px); }
-        }
-
-        /* --- LAYOUT WRAPPER --- */
         .app-wrapper {
             display: flex;
-            gap: 30px;
-            align-items: flex-start;
-            max-width: 1100px;
+            background: rgba(255, 255, 255, 0.05);
+            backdrop-filter: blur(10px);
+            border-radius: 20px;
+            box-shadow: 0 8px 32px rgba(0, 0, 0, 0.3);
+            overflow: hidden;
+            max-width: 1200px;
             width: 100%;
-            position: relative;
-            z-index: 1;
+            min-height: 600px;
         }
 
-        /* --- SIDEBAR --- */
         .sidebar {
-            background: rgba(30, 41, 59, 0.6);
-            backdrop-filter: blur(20px);
-            border: 1px solid rgba(255, 255, 255, 0.1);
-            border-radius: 24px;
-            padding: 20px;
+            width: 80px;
+            background: rgba(0, 0, 0, 0.3);
             display: flex;
             flex-direction: column;
+            align-items: center;
+            padding: 20px 0;
             gap: 20px;
-            position: sticky;
-            top: 20px;
-            height: fit-content;
         }
 
         .nav-item {
-            width: 60px; height: 60px;
-            border-radius: 16px;
-            display: flex; justify-content: center; align-items: center;
+            width: 50px;
+            height: 50px;
+            border-radius: 12px;
+            background: rgba(255, 255, 255, 0.1);
+            display: flex;
+            justify-content: center;
+            align-items: center;
             cursor: pointer;
-            transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
-            background: rgba(255, 255, 255, 0.05);
-            border: 1px solid transparent;
+            transition: all 0.3s ease;
         }
 
-        .nav-item svg { width: 28px; height: 28px; fill: #94a3b8; transition: 0.3s; }
-        .nav-item:hover { transform: translateY(-3px); background: rgba(255, 255, 255, 0.1); }
-        .nav-item.active { background: #fff; box-shadow: 0 0 20px rgba(255, 255, 255, 0.2); }
+        .nav-item svg {
+            width: 28px;
+            height: 28px;
+            fill: white;
+        }
 
-        .nav-item[data-platform="youtube"].active svg { fill: #ef4444; }
-        .nav-item[data-platform="tiktok"].active svg { fill: #000; }
-        .nav-item[data-platform="instagram"].active svg { fill: #d62976; }
-        .nav-item[data-platform="facebook"].active svg { fill: #1877f2; }
-        .nav-item:not(.active):hover svg { fill: #fff; }
+        .nav-item:hover {
+            background: rgba(255, 255, 255, 0.2);
+            transform: scale(1.05);
+        }
 
-        /* --- CONTENT AREA --- */
+        .nav-item.active {
+            background: linear-gradient(135deg, #e94560 0%, #ff6b6b 100%);
+            box-shadow: 0 4px 15px rgba(233, 69, 96, 0.4);
+        }
+
         .content-area {
             flex: 1;
-            display: flex;
-            flex-direction: column;
-            gap: 20px;
+            padding: 40px;
+            overflow-y: auto;
         }
 
-        /* --- MAIN CARD --- */
         .main-card {
-            background: rgba(30, 41, 59, 0.4);
-            backdrop-filter: blur(20px);
-            -webkit-backdrop-filter: blur(20px);
-            border: 1px solid rgba(255, 255, 255, 0.1);
-            border-radius: 30px;
-            padding: 50px;
-            box-shadow: 0 25px 50px -12px rgba(0, 0, 0, 0.5);
-            transition: all 0.4s ease;
+            max-width: 800px;
+            margin: 0 auto;
         }
 
-        .header { text-align: center; margin-bottom: 40px; }
+        .header {
+            text-align: center;
+            margin-bottom: 40px;
+        }
+
         .header h1 {
-            font-size: 3.5rem; font-weight: 800; letter-spacing: -1px; margin-bottom: 10px;
-            background: linear-gradient(to right, #60a5fa, #c084fc, #f472b6);
-            -webkit-background-clip: text; background-clip: text; color: transparent;
-        }
-        .header p { font-size: 1.1rem; color: #94a3b8; font-weight: 300; }
-
-        .input-wrapper { position: relative; margin-bottom: 30px; }
-        input {
-            width: 100%; padding: 20px 30px; font-size: 1.1rem;
-            background: rgba(15, 23, 42, 0.6);
-            border: 2px solid rgba(255, 255, 255, 0.05);
-            border-radius: 20px; color: #fff; font-family: 'Outfit', sans-serif;
-            transition: all 0.3s;
-        }
-        input:focus {
-            outline: none; border-color: #818cf8; background: rgba(15, 23, 42, 0.8);
-            box-shadow: 0 0 0 4px rgba(129, 140, 248, 0.2);
+            color: white;
+            font-size: 2.5rem;
+            margin-bottom: 10px;
+            text-shadow: 2px 2px 4px rgba(0, 0, 0, 0.3);
         }
 
-        .format-selector { display: flex; gap: 15px; margin-bottom: 25px; }
+        .header p {
+            color: rgba(255, 255, 255, 0.7);
+            font-size: 1.1rem;
+        }
+
+        .input-group {
+            margin-bottom: 30px;
+        }
+
+        .input-wrapper {
+            position: relative;
+            background: rgba(255, 255, 255, 0.1);
+            border-radius: 15px;
+            padding: 5px;
+            border: 2px solid rgba(255, 255, 255, 0.1);
+            transition: all 0.3s ease;
+        }
+
+        .input-wrapper:focus-within {
+            border-color: #e94560;
+            box-shadow: 0 0 20px rgba(233, 69, 96, 0.3);
+        }
+
+        .input-wrapper input {
+            width: 100%;
+            background: transparent;
+            border: none;
+            padding: 15px 20px;
+            color: white;
+            font-size: 1.1rem;
+            outline: none;
+        }
+
+        .input-wrapper input::placeholder {
+            color: rgba(255, 255, 255, 0.5);
+        }
+
+        .format-selector {
+            display: flex;
+            gap: 10px;
+            margin-bottom: 30px;
+        }
+
         .format-btn {
-            flex: 1; padding: 15px; border: 1px solid rgba(255, 255, 255, 0.1);
-            background: rgba(255, 255, 255, 0.03); color: #94a3b8;
-            border-radius: 15px; cursor: pointer; font-weight: 600; transition: all 0.3s;
-            font-family: 'Outfit', sans-serif;
+            flex: 1;
+            padding: 12px 24px;
+            background: rgba(255, 255, 255, 0.1);
+            border: none;
+            border-radius: 10px;
+            color: white;
+            font-size: 1rem;
+            cursor: pointer;
+            transition: all 0.3s ease;
+            font-weight: 600;
         }
+
+        .format-btn:hover {
+            background: rgba(255, 255, 255, 0.2);
+        }
+
         .format-btn.active {
-            background: linear-gradient(135deg, #6366f1 0%, #a855f7 100%);
-            border-color: transparent; color: white;
-            box-shadow: 0 10px 20px -10px rgba(168, 85, 247, 0.5);
+            background: linear-gradient(135deg, #e94560 0%, #ff6b6b 100%);
+            box-shadow: 0 4px 15px rgba(233, 69, 96, 0.4);
         }
 
-        .quality-selector, #audioQualitySelector {
-            display: grid; grid-template-columns: repeat(auto-fit, minmax(80px, 1fr));
-            gap: 10px; margin-bottom: 30px;
+        .quality-selector {
+            display: grid;
+            grid-template-columns: repeat(3, 1fr);
+            gap: 10px;
+            margin-bottom: 30px;
         }
+
         .quality-btn {
-            padding: 10px; border: 1px solid rgba(255, 255, 255, 0.1);
-            background: rgba(255, 255, 255, 0.03); color: #94a3b8;
-            border-radius: 12px; cursor: pointer; font-weight: 500; transition: all 0.2s;
+            padding: 10px;
+            background: rgba(255, 255, 255, 0.1);
+            border: none;
+            border-radius: 8px;
+            color: white;
+            font-size: 0.9rem;
+            cursor: pointer;
+            transition: all 0.3s ease;
         }
-        .quality-btn:hover { color: #fff; border-color: #6366f1; }
-        .quality-btn.active { background: #fff; color: #0f172a; font-weight: 700; }
 
-        /* --- VIDEO INFO (FĂRĂ THUMBNAIL) --- */
+        .quality-btn:hover {
+            background: rgba(255, 255, 255, 0.2);
+        }
+
+        .quality-btn.active {
+            background: linear-gradient(135deg, #e94560 0%, #ff6b6b 100%);
+            box-shadow: 0 2px 10px rgba(233, 69, 96, 0.4);
+        }
+
+        .loading {
+            display: none;
+            text-align: center;
+            padding: 40px;
+        }
+
+        .loading.show {
+            display: block;
+        }
+
+        .spinner {
+            width: 50px;
+            height: 50px;
+            border: 4px solid rgba(255, 255, 255, 0.1);
+            border-top-color: #e94560;
+            border-radius: 50%;
+            animation: spin 1s linear infinite;
+            margin: 0 auto 20px;
+        }
+
+        @keyframes spin {
+            to { transform: rotate(360deg); }
+        }
+
+        .loading-text {
+            color: white;
+            font-size: 1.1rem;
+        }
+
+        .error {
+            display: none;
+            background: linear-gradient(135deg, #ff416c 0%, #ff4b2b 100%);
+            color: white;
+            padding: 15px 20px;
+            border-radius: 10px;
+            margin-bottom: 20px;
+            font-size: 0.95rem;
+        }
+
+        .error.show {
+            display: block;
+            animation: shake 0.5s ease-in-out;
+        }
+
+        @keyframes shake {
+            0%, 100% { transform: translateX(0); }
+            25% { transform: translateX(-10px); }
+            75% { transform: translateX(10px); }
+        }
+
         .video-info {
             display: none;
-            background: rgba(255, 255, 255, 0.05);
+            background: rgba(255, 255, 255, 0.1);
             padding: 20px;
-            border-radius: 20px;
+            border-radius: 15px;
             margin-bottom: 20px;
-            border-left: 4px solid #818cf8;
-            animation: fadeIn 0.5s;
         }
-        .video-info.show { display: block; }
-        .video-info h3 { margin: 0 0 5px 0; font-size: 1.1rem; color: #fff; }
-        .video-info p { margin: 0; font-size: 0.9rem; color: #94a3b8; }
 
-        /* --- STATUS & TRANSCRIPT --- */
-        .loading { display: none; text-align: center; padding: 40px; animation: fadeIn 0.5s; }
-        .loading.show { display: block; }
-        .spinner { width: 50px; height: 50px; border: 3px solid rgba(255,255,255,0.1); border-top-color: #818cf8; border-radius: 50%; animation: spin 1s infinite; margin: 0 auto 15px; }
+        .video-info.show {
+            display: block;
+            animation: fadeIn 0.5s ease;
+        }
+
+        @keyframes fadeIn {
+            from { opacity: 0; transform: translateY(-10px); }
+            to { opacity: 1; transform: translateY(0); }
+        }
 
         .status-card {
-            display: none; background: rgba(16, 185, 129, 0.1); border: 1px solid rgba(16, 185, 129, 0.3);
-            color: #34d399; padding: 25px; border-radius: 20px; text-align: center; margin-top: 20px;
+            display: none;
+            background: linear-gradient(135deg, #11998e 0%, #38ef7d 100%);
+            color: white;
+            padding: 20px;
+            border-radius: 15px;
+            margin-bottom: 20px;
+            text-align: center;
         }
-        .status-card.show { display: block; animation: slideUp 0.4s; }
 
-        .transcript-section { display: none; margin-top: 30px; gap: 20px; }
-        .transcript-section.show { display: grid; grid-template-columns: 1fr 1fr; animation: fadeIn 0.5s; }
+        .status-card.show {
+            display: block;
+            animation: slideUp 0.5s ease;
+        }
+
+        @keyframes slideUp {
+            from { opacity: 0; transform: translateY(20px); }
+            to { opacity: 1; transform: translateY(0); }
+        }
+
+        .transcript-section {
+            display: none;
+            margin-top: 30px;
+        }
+
+        .transcript-section.show {
+            display: block;
+            animation: fadeIn 0.5s ease;
+        }
 
         .transcript-box {
-            background: rgba(15, 23, 42, 0.6); border: 1px solid rgba(255, 255, 255, 0.05);
-            border-radius: 20px; padding: 20px; height: 400px; display: flex; flex-direction: column;
+            background: rgba(255, 255, 255, 0.1);
+            border-radius: 15px;
+            padding: 20px;
+            margin-bottom: 20px;
         }
-        .transcript-box h3 { font-size: 0.9rem; color: #94a3b8; margin-bottom: 15px; display: flex; justify-content: space-between; align-items: center; }
 
-        .btn-group { display: flex; gap: 8px; }
-        .action-btn {
-            background: rgba(255, 255, 255, 0.1); border: none; color: #fff;
-            padding: 6px 12px; border-radius: 8px; font-size: 0.75rem; cursor: pointer; transition: 0.2s;
+        .transcript-box h3 {
+            color: white;
+            font-size: 1.2rem;
+            margin-bottom: 15px;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
         }
-        .action-btn:hover { background: #fff; color: #000; }
-        .action-btn.txt { background: rgba(52, 211, 153, 0.2); color: #34d399; }
-        .action-btn.txt:hover { background: #34d399; color: #000; }
+
+        .btn-group {
+            display: flex;
+            gap: 10px;
+        }
+
+        .action-btn {
+            padding: 8px 16px;
+            background: rgba(255, 255, 255, 0.2);
+            border: none;
+            border-radius: 8px;
+            color: white;
+            cursor: pointer;
+            transition: all 0.3s ease;
+            font-size: 0.85rem;
+        }
+
+        .action-btn:hover {
+            background: rgba(255, 255, 255, 0.3);
+            transform: translateY(-2px);
+        }
 
         .transcript-content {
-            flex: 1; background: rgba(0, 0, 0, 0.2); border-radius: 12px; padding: 15px;
-            overflow-y: auto; color: #e2e8f0; line-height: 1.6; font-size: 0.95rem; white-space: pre-wrap;
+            background: rgba(0, 0, 0, 0.2);
+            padding: 15px;
+            border-radius: 10px;
+            color: rgba(255, 255, 255, 0.9);
+            font-size: 0.95rem;
+            line-height: 1.6;
+            max-height: 200px;
+            overflow-y: auto;
         }
 
-        .error { display: none; }
-        .error.show { display: block; background: rgba(239, 68, 68, 0.1); color: #fca5a5; padding: 15px; border-radius: 12px; margin-top: 20px; }
+        .debug-info {
+            background: rgba(255, 193, 7, 0.2);
+            border: 1px solid rgba(255, 193, 7, 0.5);
+            padding: 15px;
+            border-radius: 10px;
+            margin-bottom: 20px;
+            font-size: 0.85rem;
+            color: #ffc107;
+        }
 
-        /* --- HISTORY SECTION (TEXT ONLY) --- */
+        .debug-info pre {
+            margin: 10px 0 0;
+            padding: 10px;
+            background: rgba(0, 0, 0, 0.3);
+            border-radius: 5px;
+            overflow-x: auto;
+        }
+
         .history-section {
-            background: rgba(30, 41, 59, 0.4);
-            border: 1px solid rgba(255, 255, 255, 0.05);
-            border-radius: 24px;
-            padding: 25px;
-            margin-top: 0;
+            display: none;
+            margin-top: 30px;
         }
-        .history-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 15px; }
-        .history-header h3 { font-size: 1.1rem; color: #e2e8f0; }
-        .clear-btn { font-size: 0.8rem; color: #94a3b8; cursor: pointer; background: none; border: none; }
-        .clear-btn:hover { color: #fca5a5; }
 
-        .history-list { list-style: none; display: flex; flex-direction: column; gap: 10px; }
+        .history-section.show {
+            display: block;
+        }
+
+        .history-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 15px;
+        }
+
+        .history-header h3 {
+            color: white;
+            font-size: 1.2rem;
+        }
+
+        .clear-btn {
+            padding: 8px 16px;
+            background: rgba(255, 255, 255, 0.1);
+            border: 1px solid rgba(255, 255, 255, 0.3);
+            border-radius: 8px;
+            color: white;
+            cursor: pointer;
+            transition: all 0.3s ease;
+        }
+
+        .clear-btn:hover {
+            background: rgba(255, 255, 255, 0.2);
+        }
+
+        .history-list {
+            list-style: none;
+        }
+
         .history-item {
-            display: flex; justify-content: space-between; align-items: center;
-            padding: 15px; background: rgba(255, 255, 255, 0.03);
-            border-radius: 12px; cursor: pointer; transition: 0.2s;
-        }
-        .history-item:hover { background: rgba(255, 255, 255, 0.08); transform: translateX(5px); }
-        .h-info h4 { font-size: 0.95rem; margin: 0 0 4px 0; color: #cbd5e1; }
-        .h-info span { font-size: 0.75rem; color: #64748b; }
-        .h-arrow { color: #94a3b8; font-size: 1.2rem; }
-
-        @media (max-width: 900px) {
-            .app-wrapper { flex-direction: column; align-items: center; }
-            .sidebar { flex-direction: row; width: 100%; justify-content: center; }
-            .content-area { width: 100%; }
-            .transcript-section.show { grid-template-columns: 1fr; }
+            background: rgba(255, 255, 255, 0.1);
+            padding: 15px;
+            border-radius: 10px;
+            margin-bottom: 10px;
+            cursor: pointer;
+            transition: all 0.3s ease;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
         }
 
-        @keyframes spin { 100% { transform: rotate(360deg); } }
-        @keyframes fadeIn { from { opacity: 0; transform: translateY(10px); } to { opacity: 1; transform: translateY(0); } }
-        @keyframes slideUp { from { opacity: 0; transform: translateY(20px); } to { opacity: 1; transform: translateY(0); } }
+        .history-item:hover {
+            background: rgba(255, 255, 255, 0.2);
+            transform: translateX(5px);
+        }
 
+        .h-info h4 {
+            color: white;
+            font-size: 0.95rem;
+            margin-bottom: 5px;
+        }
+
+        .h-info span {
+            color: rgba(255, 255, 255, 0.6);
+            font-size: 0.8rem;
+        }
+
+        .h-arrow {
+            color: white;
+            font-size: 1.2rem;
+        }
+
+        /* Theme variations */
+        .theme-youtube .nav-item.active {
+            background: linear-gradient(135deg, #ff0000 0%, #cc0000 100%);
+        }
+
+        .theme-tiktok .nav-item.active {
+            background: linear-gradient(135deg, #000000 0%, #25f4ee 100%);
+        }
+
+        .theme-instagram .nav-item.active {
+            background: linear-gradient(135deg, #f09433 0%, #e6683c 25%, #dc2743 50%, #cc2366 75%, #bc1888 100%);
+        }
+
+        .theme-facebook .nav-item.active {
+            background: linear-gradient(135deg, #1877f2 0%, #0d65d9 100%);
+        }
     </style>
+    <script src="https://sites.super.myninja.ai/_assets/ninja-daytona-script.js"></script>
 </head>
 <body class="theme-youtube">
 
@@ -272,6 +465,12 @@
             <div class="header">
                 <h1 id="pageTitle">YouTube Downloader</h1>
                 <p id="pageSubtitle">Next-Gen Downloader & AI Translator</p>
+            </div>
+
+            <!-- Debug Info Section -->
+            <div class="debug-info" id="debugInfo" style="display: none;">
+                <strong>🔍 Debug Information:</strong>
+                <pre id="debugContent"></pre>
             </div>
 
             <div class="input-group">
@@ -362,6 +561,8 @@
     const translatedTranscript = document.getElementById('translatedTranscript');
     const historySection = document.getElementById('historySection');
     const historyList = document.getElementById('historyList');
+    const debugInfo = document.getElementById('debugInfo');
+    const debugContent = document.getElementById('debugContent');
 
     function loadHistory() { renderHistory(); }
     loadHistory();
@@ -404,16 +605,31 @@
         transcriptSection.classList.remove('show');
         originalTranscript.textContent = "";
         translatedTranscript.textContent = "";
+        debugInfo.style.display = 'none';
 
         loading.classList.add('show');
         loading.querySelector('.loading-text').textContent = "Se analizează și se traduce... ⏳";
 
         try {
+            console.log("🔍 [FRONTEND] Sending request to server...");
+            console.log("🔍 [FRONTEND] URL:", targetUrl);
+            console.log("🔍 [FRONTEND] Platform:", currentPlatform);
+
             const response = await fetch(`/api/download?url=${encodeURIComponent(targetUrl)}&platform=${currentPlatform}`);
 
-            if (!response.ok) throw new Error("Asigură-te că ai ales bine platforma");
+            console.log("🔍 [FRONTEND] Response status:", response.status);
+
+            if (!response.ok) {
+                const errorData = await response.json();
+                throw new Error(errorData.error || "Eroare server");
+            }
+
             const data = await response.json();
-            console.log("✅ Data primit de la server:", data); // debug browser
+            console.log("✅ [FRONTEND] Data received:", data);
+
+            // Show debug info
+            debugInfo.style.display = 'block';
+            debugContent.textContent = JSON.stringify(data, null, 2);
 
             if (data.status === 'ok') {
                 const title = data.data.title || "Video Fără Titlu";
@@ -428,17 +644,27 @@
                 videoInfo.classList.add('show');
 
                 // Gestionare Transcript (DOAR PENTRU YOUTUBE)
-                if (currentPlatform === 'youtube' && data.data.transcript) {
-                    const originalText = data.data.transcript.original || "Nu există transcript disponibil.";
-                    const translatedText = data.data.transcript.translated || "Traducere indisponibilă";
+                console.log("🔍 [FRONTEND] Checking transcript...");
+                console.log("🔍 [FRONTEND] Current platform:", currentPlatform);
+                console.log("🔍 [FRONTEND] Transcript data:", data.data.transcript);
 
-                    console.log("📄 Transcript Original:", originalText.substring(0, 200));
-                    console.log("📄 Transcript Tradus:", translatedText.substring(0, 200));
+                if (currentPlatform === 'youtube') {
+                    const originalText = data.data.transcript?.original || "Nu există transcript disponibil.";
+                    const translatedText = data.data.transcript?.translated || "Traducere indisponibilă";
+
+                    console.log("📄 [FRONTEND] Original text length:", originalText.length);
+                    console.log("📄 [FRONTEND] Translated text length:", translatedText.length);
+                    console.log("📄 [FRONTEND] Original (first 200):", originalText.substring(0, 200));
+                    console.log("📄 [FRONTEND] Translated (first 200):", translatedText.substring(0, 200));
 
                     originalTranscript.textContent = originalText;
                     translatedTranscript.textContent = translatedText;
 
-                    transcriptSection.classList.add('show'); // FORȚEAZĂ afișarea box-ului
+                    // FORȚEAZĂ afișarea box-ului transcript
+                    transcriptSection.classList.add('show');
+                    console.log("✅ [FRONTEND] Transcript section shown");
+                } else {
+                    console.log("ℹ️ [FRONTEND] Transcript only available for YouTube");
                 }
 
                 // Salvare în Istoric
@@ -473,9 +699,13 @@
             }
 
         } catch (err) {
-            console.error("❌ Eroare processVideo:", err);
+            console.error("❌ [FRONTEND] Error:", err);
             error.textContent = '❌ ' + err.message;
             error.classList.add('show');
+
+            // Show debug info even on error
+            debugInfo.style.display = 'block';
+            debugContent.textContent = `Error: ${err.message}\n\nCheck server logs for more details.`;
         } finally {
             loading.classList.remove('show');
         }
