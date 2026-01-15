@@ -4,7 +4,8 @@ const { spawn } = require('child_process');
 const path = require('path');
 const fs = require('fs');
 const axios = require('axios');
-const { translate } = require('@vitalets/google-translate-api'); 
+
+// AM SCOS IMPORTUL PENTRU GOOGLE TRANSLATE
 
 const app = express();
 const PORT = 3003;
@@ -44,18 +45,7 @@ function cleanVttText(vttContent) {
     return cleanText.join(' ');
 }
 
-// --- 2. TRADUCERE GOOGLE (FALLBACK) ---
-async function translateWithGoogle(text) {
-    console.log("\n🔄 Trec pe Google Translate (Gratuit)...");
-    try {
-        const res = await translate(text, { to: 'ro' });
-        return res.text;
-    } catch (err) {
-        return text;
-    }
-}
-
-// --- 3. TRADUCERE GPT CU STREAMING (MATRIX STYLE) ---
+// --- 2. TRADUCERE GPT CU STREAMING (MATRIX STYLE) ---
 async function translateWithGPT(text) {
     if (!text || text.length < 5) return "Nu există suficient text.";
     const textToTranslate = text.substring(0, 3000);
@@ -112,11 +102,12 @@ async function translateWithGPT(text) {
 
     } catch (error) {
         console.warn("\n⚠️ Eroare OpenAI Stream:", error.message);
-        return await translateWithGoogle(text);
+        // Fallback: Returnăm textul original dacă GPT eșuează, deoarece Google Translate a fost scos.
+        return `(Traducere eșuată - Text Original): ${text}`; 
     }
 }
 
-// --- 4. LOGICA DOWNLOADER ---
+// --- 3. LOGICA DOWNLOADER ---
 async function getOriginalTranscript(url) {
     const uniqueId = Date.now();
     const outputTemplate = path.join(__dirname, `trans_${uniqueId}`);
@@ -191,9 +182,14 @@ app.get('/api/download', async (req, res) => {
             console.log(`⏩ ${platform} - skip transcript (doar download)`);
         }
 
+        // --- DINAMIC HOST URL ---
+        // Folosim req.headers.host pentru a genera link-ul corect indiferent dacă ești pe localhost sau IP public
+        const protocol = req.protocol; 
+        const host = req.headers.host; // Ex: localhost:3003 sau 192.168.1.X:3003 sau domeniu.ro
+
         const formats = [
-            { quality: 'Video HD (MP4)', url: `http://localhost:${PORT}/api/stream?type=video&url=${encodeURIComponent(videoUrl)}` },
-            { quality: 'Audio Only (MP3)', url: `http://localhost:${PORT}/api/stream?type=audio&url=${encodeURIComponent(videoUrl)}` }
+            { quality: 'Video HD (MP4)', url: `${protocol}://${host}/api/stream?type=video&url=${encodeURIComponent(videoUrl)}` },
+            { quality: 'Audio Only (MP3)', url: `${protocol}://${host}/api/stream?type=audio&url=${encodeURIComponent(videoUrl)}` }
         ];
 
         res.json({
@@ -220,6 +216,8 @@ app.get('/api/stream', (req, res) => {
     process.stdout.pipe(res);
 });
 
-app.listen(PORT, () => {
-    console.log(`📥 Downloader Pro (Smart Transcript) pornit pe ${PORT}`);
+// Ascultă pe toate interfețele de rețea (0.0.0.0) pentru acces din extern
+app.listen(PORT, '0.0.0.0', () => {
+    console.log(`📥 Downloader Pro (Host Mode) pornit pe portul ${PORT}`);
+    console.log(`🌍 Accesibil extern via IP-ul serverului.`);
 });
