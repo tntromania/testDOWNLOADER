@@ -2,174 +2,220 @@ const express = require('express');
 const cors = require('cors');
 const { spawn } = require('child_process');
 const path = require('path');
-const fs = require('fs');
 const axios = require('axios');
+const fs = require('fs');
 
 const app = express();
-const PORT = 3003;
+const PORT = process.env.PORT || 3000;
 
 app.use(cors());
 app.use(express.json());
 
-// Pe Coolify/Linux, yt-dlp trebuie să fie instalat în sistem (PATH)
-const YTDLP_CMD = 'yt-dlp'; 
+// ================= CONFIG =================
 const OPENAI_API_KEY = process.env.OPENAI_API_KEY;
 
-// --- 1. CONFIGURARE ANTI-BLOCK ---
-function getYtArgs() {
-    return [
-        '--no-warnings',
-        '--no-check-certificates',
-        '--force-ipv4',
-        '--user-agent', 'Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
-        '--sleep-requests', '1'
-    ];
-}
+const YTDLP_PATH = process.platform === 'win32'
+    ? path.join(__dirname, 'yt-dlp.exe')
+    : 'yt-dlp';
 
-// --- 2. CURĂȚARE VTT ---
-function cleanVtt(text) {
-    if (!text) return "";
-    const lines = text.split('\n');
-    const uniqueLines = new Set();
-    const result = [];
+const COOKIES_PATH = path.join(__dirname, 'cookies.txt');
 
-    lines.forEach(line => {
-        line = line.trim();
-        // Ignoră metadata, timestamp-uri și linii goale
-        if (!line || line.includes('-->') || line.startsWith('WEBVTT') || /^\d+$/.test(line) || line.startsWith('Kind:') || line.startsWith('Language:')) return;
-        
-        line = line.replace(/<[^>]*>/g, ''); // Scoate tag-uri HTML
-        
-        if (!uniqueLines.has(line) && line.length > 1) {
-            uniqueLines.add(line);
-            result.push(line);
-        }
-    });
-    return result.join(' ');
-}
-
-// --- 3. EXTRAGERE TRANSCRIPT (Metoda Fișier Temporar) ---
-async function getTranscript(url) {
-    const id = Date.now();
-    const tempFile = path.join(__dirname, `sub_${id}`);
-    
-    // Comandă specifică pentru extragere subtitrare EN
+// ================= UTILS =================
+function getYtDlpArgs() {
     const args = [
-        ...getYtArgs(),
-        '--skip-download',
-        '--write-sub', '--write-auto-sub',
-        '--sub-lang', 'en',
-        '--convert-subs', 'vtt',
-        '--output', tempFile,
-        url
+        '--no-warnings',
+        '--quiet',
+        '--force-ipv4',
+        '--user-agent',
+        'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/120 Safari/537.36'
     ];
+    if (fs.existsSync(COOKIES_PATH)) {
+        args.push('--cookies', COOKIES_PATH);
+    }
+    return args;
+}
 
-    return new Promise(resolve => {
-        const proc = spawn(YTDLP_CMD, args);
-        
-        proc.on('close', () => {
-            // Verifică variantele de nume posibile
-            const files = [`${tempFile}.en.vtt`, `${tempFile}.en-orig.vtt`, `${tempFile}.en-auto.vtt`];
-            const found = files.find(f => fs.existsSync(f));
+function cleanVttText(vtt) {
+    return vtt
+        .split('\n')
+        .filter(l =>
+            l &&
+            !l.includes('-->') &&
+            !l.startsWith('WEBVTT') &&
+            !/^\d+$/.test(l)
+        )
+        .map(l => l.replace(/<[^>]+>/g, '').trim())
+        .join(' ');
+}
 
-            if (found) {
-                try {
-                    const content = fs.readFileSync(found, 'utf8');
-                    fs.unlinkSync(found); // Șterge fișierul imediat
-                    resolve(cleanVtt(content));
-                } catch (e) { resolve(null); }
-            } else {
+// ================= TRANSCRIPT =================
+async function getOriginalTranscript(url) {
+    return new Promise((resolve) => {
+        const args = [...getYtDlpArgs(), '--dump-json', '--skip-download', url];
+
+        const proc = spawn(YTDLP_PATH, args, {
+            stdio: ['ignore', 'pipe', 'ignore']
+        });
+
+        let out = '';
+        proc.stdout.on('data', d => out += d.toString());
+
+        proc.on('close', async () => {
+            try {
+                const data = JSON.parse(out);
+
+                const captions =
+                    data.automatic_captions?.en ||
+                    data.subtitles?.en ||
+                    null;
+
+                if (!captions) {
+                    console.log('❌ Transcript inexistent');
+                    return resolve(null);
+                }
+
+                const vttUrl = captions.find(c => c.ext === 'vtt')?.url;
+                if (!vttUrl) return resolve(null);
+
+                const res = await axios.get(vttUrl);
+                console.log('✅ Transcript identificat');
+
+                resolve(cleanVttText(res.data));
+            } catch {
                 resolve(null);
             }
         });
     });
 }
 
-// --- 4. TRADUCERE GPT ---
-async function translateGPT(text) {
-    if (!text || !OPENAI_API_KEY) return null;
-    try {
-        const resp = await axios.post('https://api.openai.com/v1/chat/completions', {
-            model: "gpt-4o-mini",
+// ================= GPT TRANSLATE =================
+async function translateWithGPT(text) {
+    if (!OPENAI_API_KEY || !text) return 'Traducere indisponibilă';
+
+    console.log('🤖 Traducere cu GPT...');
+
+    const res = await axios.post(
+        'https://api.openai.com/v1/chat/completions',
+        {
+            model: 'gpt-4o-mini',
             messages: [
-                { role: "system", content: "Traducere în română. Doar textul, fără explicații." },
-                { role: "user", content: text.substring(0, 5000) }
-            ]
-        }, { headers: { Authorization: `Bearer ${OPENAI_API_KEY}` } });
-        return resp.data.choices[0].message.content;
-    } catch (e) {
-        console.error("Eroare GPT:", e.message);
-        return "Eroare la traducere.";
-    }
+                {
+                    role: 'system',
+                    content:
+                        'Ești un traducător profesionist. Tradu în română natural, fără explicații.'
+                },
+                {
+                    role: 'user',
+                    content: text.substring(0, 5000)
+                }
+            ],
+            temperature: 0.3
+        },
+        {
+            headers: {
+                Authorization: `Bearer ${OPENAI_API_KEY}`
+            }
+        }
+    );
+
+    return res.data.choices[0].message.content;
 }
 
-// --- 5. METADATA ---
-function getMetadata(url) {
-    return new Promise(resolve => {
-        let data = '';
-        const proc = spawn(YTDLP_CMD, [...getYtArgs(), '--dump-json', url]);
-        proc.stdout.on('data', d => data += d);
+// ================= METADATA =================
+function getYtMetadata(url) {
+    return new Promise((resolve) => {
+        const args = [...getYtDlpArgs(), '--dump-json', url];
+        const proc = spawn(YTDLP_PATH, args, { stdio: ['ignore', 'pipe', 'ignore'] });
+
+        let buf = '';
+        proc.stdout.on('data', d => buf += d);
+
         proc.on('close', () => {
-            try { resolve(JSON.parse(data)); } 
-            catch { resolve({ title: "Video", description: "" }); }
+            try {
+                const d = JSON.parse(buf);
+                resolve({
+                    title: d.title || 'Video',
+                    duration: d.duration_string || ''
+                });
+            } catch {
+                resolve({ title: 'Video', duration: '' });
+            }
         });
     });
 }
 
-// --- ROUTES ---
-
+// ================= API =================
 app.get('/api/download', async (req, res) => {
-    const { url } = req.query;
+    const url = req.query.url;
     if (!url) return res.status(400).json({ error: 'URL lipsă' });
 
-    console.log(`Processing: ${url}`);
-
     try {
-        // 1. Metadata & Transcript
-        const meta = await getMetadata(url);
-        let text = await getTranscript(url);
+        const meta = await getYtMetadata(url);
 
-        // Fallback la descriere dacă nu e transcript
-        if (!text) text = (meta.description || "").replace(/https?:\/\/\S+/g, '');
+        const transcript = await getOriginalTranscript(url);
+        let translated = null;
 
-        // 2. Traducere
-        const translated = (text && text.length > 5) ? await translateGPT(text) : "Lipsă text.";
+        if (transcript) {
+            translated = await translateWithGPT(transcript);
+        }
 
-        // 3. Link-uri stream
-        const host = `${req.protocol}://${req.get('host')}`;
-        const makeLink = (type) => `${host}/api/stream?url=${encodeURIComponent(url)}&type=${type}`;
+        const base = `${req.protocol}://${req.get('host')}`;
 
         res.json({
             status: 'ok',
             data: {
                 title: meta.title,
-                formats: [
-                    { quality: 'Video (Best)', url: makeLink('video') },
-                    { quality: 'Audio (MP3)', url: makeLink('audio') }
-                ],
+                duration: meta.duration,
                 transcript: {
-                    original: text ? text.substring(0, 3000) : null,
+                    original: transcript,
                     translated: translated
-                }
+                },
+                formats: [
+                    {
+                        format: 'mp4',
+                        quality: 'best',
+                        url: `${base}/api/stream?url=${encodeURIComponent(url)}`
+                    },
+                    {
+                        format: 'mp3',
+                        quality: 'audio',
+                        url: `${base}/api/stream?url=${encodeURIComponent(url)}&audio=1`
+                    }
+                ]
             }
         });
     } catch (e) {
-        res.status(500).json({ error: 'Server Error' });
+        res.status(500).json({ error: 'Eroare server' });
     }
 });
 
 app.get('/api/stream', (req, res) => {
-    const { url, type } = req.query;
-    const isAudio = type === 'audio';
-    
-    res.setHeader('Content-Type', isAudio ? 'audio/mpeg' : 'video/mp4');
-    res.setHeader('Content-Disposition', `attachment; filename="${isAudio ? 'audio.mp3' : 'video.mp4'}"`);
+    const url = req.query.url;
+    const isAudio = req.query.audio;
 
-    const args = [...getYtArgs(), '-o', '-', '-f', isAudio ? 'bestaudio' : 'best', url];
-    const proc = spawn(YTDLP_CMD, args);
-    
+    res.setHeader(
+        'Content-Disposition',
+        `attachment; filename="${isAudio ? 'audio.mp3' : 'video.mp4'}"`
+    );
+
+    const args = [
+        ...getYtDlpArgs(),
+        '-o',
+        '-',
+        '-f',
+        isAudio ? 'bestaudio' : 'best',
+        url
+    ];
+
+    const proc = spawn(YTDLP_PATH, args, {
+        stdio: ['ignore', 'pipe', 'ignore']
+    });
+
     proc.stdout.pipe(res);
     req.on('close', () => proc.kill());
 });
 
-app.listen(PORT, '0.0.0.0', () => console.log(`Coolify Server running on port ${PORT}`));
+// ================= START =================
+app.listen(PORT, '0.0.0.0', () => {
+    console.log(`🚀 Server pornit pe portul ${PORT}`);
+});
