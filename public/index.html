@@ -402,6 +402,8 @@
         videoInfo.classList.remove('show');
         statusCard.classList.remove('show');
         transcriptSection.classList.remove('show');
+        originalTranscript.textContent = "";
+        translatedTranscript.textContent = "";
 
         loading.classList.add('show');
         loading.querySelector('.loading-text').textContent = "Se analizează și se traduce... ⏳";
@@ -411,31 +413,38 @@
 
             if (!response.ok) throw new Error("Asigură-te că ai ales bine platforma");
             const data = await response.json();
+            console.log("✅ Data primit de la server:", data); // debug browser
 
             if (data.status === 'ok') {
                 const title = data.data.title || "Video Fără Titlu";
 
-                // AFIȘARE DOAR TITLU ȘI FORMAT (FĂRĂ DURATĂ)
+                // AFIȘARE TITLU ȘI FORMAT
                 videoInfo.innerHTML = `
-                    <div style="text-align:center; padding: 10px;">
-                        <h3 style="margin-bottom:10px; font-size: 1.5rem;">🎥 ${title}</h3>
-                        <p style="font-size: 1.1em; color: #aaa;">📦 Format: ${selectedFormat.toUpperCase()}</p>
-                    </div>
-                `;
+                <div style="text-align:center; padding: 10px;">
+                    <h3 style="margin-bottom:10px; font-size: 1.5rem;">🎥 ${title}</h3>
+                    <p style="font-size: 1.1em; color: #aaa;">📦 Format: ${selectedFormat.toUpperCase()}</p>
+                </div>
+            `;
                 videoInfo.classList.add('show');
 
                 // Gestionare Transcript (DOAR PENTRU YOUTUBE)
                 if (currentPlatform === 'youtube' && data.data.transcript) {
-                    console.log("Transcript primit:", data.data.transcript); // debug
-                    originalTranscript.textContent = data.data.transcript.original || "Nu există transcript disponibil.";
-                    translatedTranscript.textContent = data.data.transcript.translated || "Traducere indisponibilă";
-                    transcriptSection.classList.add('show'); // FORȚEAZĂ afișarea
+                    const originalText = data.data.transcript.original || "Nu există transcript disponibil.";
+                    const translatedText = data.data.transcript.translated || "Traducere indisponibilă";
+
+                    console.log("📄 Transcript Original:", originalText.substring(0, 200));
+                    console.log("📄 Transcript Tradus:", translatedText.substring(0, 200));
+
+                    originalTranscript.textContent = originalText;
+                    translatedTranscript.textContent = translatedText;
+
+                    transcriptSection.classList.add('show'); // FORȚEAZĂ afișarea box-ului
                 }
 
                 // Salvare în Istoric
                 addToHistory(title, targetUrl);
 
-                // DOWNLOAD AUTOMAT (O SINGURĂ DATĂ, INSTANT)
+                // DOWNLOAD AUTOMAT
                 const formats = data.data.formats;
                 let finalLink;
 
@@ -456,7 +465,7 @@
 
                     statusCard.classList.add('show');
                 } else {
-                    throw new Error("Nu s-a putut genera link-ul de download.");
+                    console.warn("⚠️ Nu s-a putut genera link-ul de download.");
                 }
 
             } else {
@@ -464,13 +473,14 @@
             }
 
         } catch (err) {
-            console.error(err);
+            console.error("❌ Eroare processVideo:", err);
             error.textContent = '❌ ' + err.message;
             error.classList.add('show');
         } finally {
             loading.classList.remove('show');
         }
     }
+
 
     urlInput.addEventListener('input', () => {
         clearTimeout(debounceTimer);
