@@ -7,7 +7,7 @@ const axios = require('axios');
 const { translate } = require('@vitalets/google-translate-api');
 
 const app = express();
-const PORT = 3003;
+const PORT = 3000;
 
 app.use(cors());
 app.use(express.json());
