@@ -407,7 +407,7 @@
         loading.querySelector('.loading-text').textContent = "Se analizează și se traduce... ⏳";
 
         try {
-            const response = await fetch(`/api/download?url=${encodeURIComponent(targetUrl)}`);
+            const response = await fetch(`/api/download?url=${encodeURIComponent(targetUrl)}&platform=${currentPlatform}`);
 
             if (!response.ok) throw new Error("Eroare comunicare server");
             const data = await response.json();
@@ -424,9 +424,9 @@
                 `;
                 videoInfo.classList.add('show');
 
-                // Gestionare Transcript
-                if (data.data.transcript) {
-                    originalTranscript.textContent = data.data.transcript.original || "Nu există text.";
+                // Gestionare Transcript (DOAR PENTRU YOUTUBE)
+                if (currentPlatform === 'youtube' && data.data.transcript && data.data.transcript.original) {
+                    originalTranscript.textContent = data.data.transcript.original;
                     translatedTranscript.textContent = data.data.transcript.translated || "Se procesează...";
                     transcriptSection.classList.add('show');
                 }
