@@ -18,7 +18,7 @@ const OPENAI_API_KEY = process.env.OPENAI_API_KEY;
 const YTDLP_PATH = '/usr/local/bin/yt-dlp';
 const COOKIES_PATH = path.join(__dirname, 'cookies.txt');
 
-// --- 1. CURĂȚARE TEXT (Clasic) ---
+// --- 1. CURĂȚARE TEXT (Funcția corectă din prima versiune) ---
 function cleanVttText(vttContent) {
     if (!vttContent) return "";
     const lines = vttContent.split('\n');
@@ -63,7 +63,7 @@ async function translateWithAI(text) {
     } catch (err) { return "Traducere indisponibilă."; }
 }
 
-// --- 3. EXTRAGERE TRANSCRIPT (Metoda ta care merge) ---
+// --- 3. EXTRAGERE TRANSCRIPT (Metoda CORECTĂ din prima versiune) ---
 async function getOriginalTranscript(url) {
     const uniqueId = Date.now();
     const outputTemplate = path.join(__dirname, `trans_${uniqueId}`);
@@ -91,7 +91,7 @@ async function getOriginalTranscript(url) {
     });
 }
 
-// --- 4. METADATA (Rapid) ---
+// --- 4. METADATA (Rapid, doar titlu) ---
 async function getYtMetadata(url) {
     try {
         const oembed = await axios.get(`https://www.youtube.com/oembed?url=${url}&format=json`);
