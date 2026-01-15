@@ -152,25 +152,25 @@ async function getOriginalTranscript(url) {
 }
 
 // --- 4. METADATA ---
-async function getYtMetadata(url) {
-    try {
-        const oembed = await axios.get(`https://www.youtube.com/oembed?url=${url}&format=json`);
-        return { title: oembed.data.title };
-    } catch (e) {
-        return new Promise((resolve) => {
-            const proc = spawn(YTDLP_PATH, ['--dump-json', '--no-warnings', url]);
-            let buf = '';
-            proc.stdout.on('data', d => buf += d);
-            proc.on('close', () => {
-                try { 
-                    const data = JSON.parse(buf);
-                    resolve({ title: data.title || "Video" }); 
-                } catch (e) { 
-                    resolve({ title: "Video" }); 
-                }
-            });
-        });
+// --- HELPER: Argumente standard pentru yt-dlp (Anti-Block 2024) ---
+function getYtDlpArgs() {
+    const args = [
+        '--no-warnings',
+        '--no-check-certificates',
+        '--force-ipv4',
+        // Update la un User Agent modern (Chrome 120+)
+        '--user-agent', 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+        '--referer', 'https://www.youtube.com/',
+        // Adăugăm sleep pentru a nu bombarda serverul (pare comportament uman)
+        '--sleep-requests', '1',
+        '--sleep-interval', '2',
+        '--sleep-subtitles', '1'
+    ];
+    
+    if (fs.existsSync(COOKIES_PATH)) {
+        args.push('--cookies', COOKIES_PATH);
     }
+    return args;
 }
 
 // --- ENDPOINT PRINCIPAL ---
