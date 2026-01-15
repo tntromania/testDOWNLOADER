@@ -14,9 +14,8 @@ app.use(express.json());
 // ================= CONFIG =================
 const OPENAI_API_KEY = process.env.OPENAI_API_KEY;
 
-const YTDLP_PATH = process.platform === 'win32'
-    ? path.join(__dirname, 'yt-dlp.exe')
-    : 'yt-dlp';
+// yt-dlp e instalat global în container
+const YTDLP_PATH = 'yt-dlp';
 
 const COOKIES_PATH = path.join(__dirname, 'cookies.txt');
 
@@ -29,9 +28,11 @@ function getYtDlpArgs() {
         '--user-agent',
         'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/120 Safari/537.36'
     ];
+
     if (fs.existsSync(COOKIES_PATH)) {
         args.push('--cookies', COOKIES_PATH);
     }
+
     return args;
 }
 
@@ -69,17 +70,12 @@ async function getOriginalTranscript(url) {
                     data.subtitles?.en ||
                     null;
 
-                if (!captions) {
-                    console.log('❌ Transcript inexistent');
-                    return resolve(null);
-                }
+                if (!captions) return resolve(null);
 
                 const vttUrl = captions.find(c => c.ext === 'vtt')?.url;
                 if (!vttUrl) return resolve(null);
 
                 const res = await axios.get(vttUrl);
-                console.log('✅ Transcript identificat');
-
                 resolve(cleanVttText(res.data));
             } catch {
                 resolve(null);
@@ -90,9 +86,7 @@ async function getOriginalTranscript(url) {
 
 // ================= GPT TRANSLATE =================
 async function translateWithGPT(text) {
-    if (!OPENAI_API_KEY || !text) return 'Traducere indisponibilă';
-
-    console.log('🤖 Traducere cu GPT...');
+    if (!OPENAI_API_KEY || !text) return null;
 
     const res = await axios.post(
         'https://api.openai.com/v1/chat/completions',
@@ -101,8 +95,7 @@ async function translateWithGPT(text) {
             messages: [
                 {
                     role: 'system',
-                    content:
-                        'Ești un traducător profesionist. Tradu în română natural, fără explicații.'
+                    content: 'Ești un traducător profesionist. Tradu în română natural, fără explicații.'
                 },
                 {
                     role: 'user',
@@ -144,17 +137,22 @@ function getYtMetadata(url) {
     });
 }
 
-// ================= API =================
+// ================= ROUTES =================
+
+// ROOT – ca să nu mai vezi "Cannot GET /"
+app.get('/', (req, res) => {
+    res.json({ status: 'ok', service: 'yt-downloader-api' });
+});
+
 app.get('/api/download', async (req, res) => {
     const url = req.query.url;
     if (!url) return res.status(400).json({ error: 'URL lipsă' });
 
     try {
         const meta = await getYtMetadata(url);
-
         const transcript = await getOriginalTranscript(url);
-        let translated = null;
 
+        let translated = null;
         if (transcript) {
             translated = await translateWithGPT(transcript);
         }
@@ -168,7 +166,7 @@ app.get('/api/download', async (req, res) => {
                 duration: meta.duration,
                 transcript: {
                     original: transcript,
-                    translated: translated
+                    translated
                 },
                 formats: [
                     {
@@ -184,7 +182,7 @@ app.get('/api/download', async (req, res) => {
                 ]
             }
         });
-    } catch (e) {
+    } catch {
         res.status(500).json({ error: 'Eroare server' });
     }
 });
