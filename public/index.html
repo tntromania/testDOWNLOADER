@@ -425,11 +425,11 @@
                 videoInfo.classList.add('show');
 
                 // Gestionare Transcript (DOAR PENTRU YOUTUBE)
-                if (currentPlatform === 'youtube' && data.data.transcript && data.data.transcript.original) {
-                    console.log("Transcript primit!", data.data.transcript); // Adaugă asta pentru debug în browser (F12)
-                    originalTranscript.textContent = data.data.transcript.original;
+                if (currentPlatform === 'youtube' && data.data.transcript) {
+                    console.log("Transcript primit:", data.data.transcript); // debug
+                    originalTranscript.textContent = data.data.transcript.original || "Nu există transcript disponibil.";
                     translatedTranscript.textContent = data.data.transcript.translated || "Traducere indisponibilă";
-                    transcriptSection.classList.add('show');
+                    transcriptSection.classList.add('show'); // FORȚEAZĂ afișarea
                 }
 
                 // Salvare în Istoric
