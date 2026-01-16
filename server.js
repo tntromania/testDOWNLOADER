@@ -3,7 +3,6 @@ const cors = require('cors');
 const { spawn } = require('child_process');
 const path = require('path');
 const fs = require('fs');
-// 👇 AICI ESTE NOUTATEA
 const { YoutubeTranscript } = require('youtube-transcript');
 
 const app = express();
@@ -17,15 +16,15 @@ app.use(express.static(__dirname));
 const YTDLP_PATH = '/usr/local/bin/yt-dlp';
 const COOKIES_PATH = path.join(__dirname, 'cookies.txt');
 
-// Argumente standard pentru yt-dlp (FOLOSITE DOAR LA DOWNLOAD ACUM)
+// Argumente standard pentru yt-dlp
 function getYtDlpArgs() {
     const args = [
         '--no-warnings',
         '--no-check-certificates',
         '--force-ipv4',
-        '--user-agent', 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36',
+        // User Agent de Android pentru a evita blocajele la download
+        '--user-agent', 'Mozilla/5.0 (Linux; Android 10; K) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Mobile Safari/537.36',
         '--referer', 'https://www.youtube.com/',
-        // Truc extra pentru download ca sa nu fii blocat
         '--extractor-args', 'youtube:player_client=android', 
     ];
     
@@ -35,33 +34,80 @@ function getYtDlpArgs() {
     return args;
 }
 
-// ✅ METODA NOUĂ: Extrage transcript folosind librăria (fără yt-dlp)
+// ✅ METODA ACTUALIZATĂ: Gestionează Shorts si User-Agent
 async function getTranscript(url) {
     console.log('🔍 Extrag transcript via youtube-transcript...');
+    
+    // 1. Conversie URL din Shorts/Mobile în format standard watch?v=ID
+    // Asta ajuta libraria sa nu se blocheze in redirect-uri
+    let videoId = '';
     try {
-        // Aceasta functie face request direct la API-ul de subtitrari
-        const transcriptItems = await YoutubeTranscript.fetchTranscript(url);
+        if (url.includes('shorts/')) {
+            videoId = url.split('shorts/')[1].split('?')[0];
+        } else if (url.includes('v=')) {
+            videoId = url.split('v=')[1].split('&')[0];
+        } else if (url.includes('youtu.be/')) {
+            videoId = url.split('youtu.be/')[1].split('?')[0];
+        }
+    } catch (e) {
+        console.log('⚠️ Nu am putut parsa ID-ul, folosesc URL original');
+    }
+
+    // Dacă am găsit ID-ul, construim un URL curat, altfel îl folosim pe cel primit
+    const cleanUrl = videoId ? `https://www.youtube.com/watch?v=${videoId}` : url;
+    console.log(`ℹ️ URL folosit pentru transcript: ${cleanUrl}`);
+
+    try {
+        // 2. Apelăm librăria cu HEADERS DE BROWSER (Foarte important pe VPS!)
+        const transcriptItems = await YoutubeTranscript.fetchTranscript(cleanUrl, {
+            lang: 'en',
+            fetchOptions: {
+                headers: {
+                    // Ne prefacem ca suntem un PC cu Chrome, nu un bot
+                    'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+                    'Accept-Language': 'en-US,en;q=0.9',
+                }
+            }
+        });
         
-        // Unim bucatile de text
         const fullText = transcriptItems.map(item => item.text).join(' ');
         
-        // Curatam textul de caractere ciudate
         const cleanText = fullText
             .replace(/&amp;/g, '&')
             .replace(/&#39;/g, "'")
             .replace(/&quot;/g, '"')
-            .replace(/\[.*?\]/g, ""); // Scoate chestii gen [Music]
+            .replace(/\[.*?\]/g, ""); 
 
         console.log('✅ Transcript extras! Lungime:', cleanText.length);
         return cleanText;
+
     } catch (e) {
         console.error('❌ Eroare transcript:', e.message);
-        // Putem returna un mesaj user-ului sau null
+        
+        // Fallback: Uneori merge mai bine daca incercam explicit cu ID-ul, nu cu URL-ul
+        if (videoId && e.message.includes('Impossible to retrieve')) {
+             console.log('🔄 Încerc din nou folosind doar Video ID...');
+             try {
+                const retryItems = await YoutubeTranscript.fetchTranscript(videoId, {
+                    lang: 'en',
+                    fetchOptions: {
+                        headers: {
+                            'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'
+                        }
+                    }
+                });
+                const retryText = retryItems.map(item => item.text).join(' ');
+                console.log('✅ Transcript extras la a doua încercare!');
+                return retryText;
+             } catch (err2) {
+                 console.error('❌ A eșuat și a doua oară.');
+             }
+        }
+        
         return null; 
     }
 }
 
-// Metadata (Titlu etc.)
 async function getYtMetadata(url) {
     try {
         const oembed = await fetch(`https://www.youtube.com/oembed?url=${url}&format=json`);
@@ -72,7 +118,6 @@ async function getYtMetadata(url) {
     }
 }
 
-// ENDPOINT PRINCIPAL
 app.get('/api/download', async (req, res) => {
     const videoUrl = req.query.url;
     if (!videoUrl) return res.status(400).json({ error: 'URL lipsă' });
@@ -83,11 +128,10 @@ app.get('/api/download', async (req, res) => {
         const metadata = await getYtMetadata(videoUrl);
         console.log('📝 Titlu:', metadata.title);
         
-        // Aici apelam noua functie de transcript
         const transcript = await getTranscript(videoUrl);
         
         if (!transcript) {
-            console.log('⚠️ Nu am putut extrage transcriptul.');
+            console.log('⚠️ Transcript indisponibil.');
         }
 
         const qualities = ['360', '480', '720', '1080'];
@@ -109,8 +153,7 @@ app.get('/api/download', async (req, res) => {
                 title: metadata.title,
                 duration: metadata.duration_string,
                 formats: formats,
-                // Trimitem mesaj daca e null
-                transcript: transcript || "Transcript indisponibil (Video-ul nu are subtitrări sau este blocat)."
+                transcript: transcript || "Nu există transcript disponibil (sau YouTube a blocat accesul)."
             }
         });
 
@@ -120,7 +163,6 @@ app.get('/api/download', async (req, res) => {
     }
 });
 
-// ENDPOINT STREAMING (Asta a ramas pe yt-dlp)
 app.get('/api/stream', (req, res) => {
     const videoUrl = req.query.url;
     const isAudio = req.query.type === 'audio';
@@ -139,9 +181,7 @@ app.get('/api/stream', (req, res) => {
     const streamProcess = spawn(YTDLP_PATH, args);
     streamProcess.stdout.pipe(res);
     
-    // Loguri pentru erori la stream
     streamProcess.stderr.on('data', (data) => {
-        // Ignoram warning-urile, afisam doar erorile grave
         if(data.toString().includes('ERROR')) console.error('Stream Error:', data.toString());
     });
 
