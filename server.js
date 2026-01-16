@@ -3,8 +3,7 @@ const cors = require('cors');
 const { spawn } = require('child_process');
 const path = require('path');
 const fs = require('fs');
-const { YoutubeTranscript } = require('youtube-transcript');
-const OpenAI = require('openai'); // 👈 Importăm OpenAI
+const OpenAI = require('openai');
 
 const app = express();
 const PORT = 3000;
@@ -17,165 +16,134 @@ app.use(express.static(__dirname));
 const YTDLP_PATH = '/usr/local/bin/yt-dlp';
 const COOKIES_PATH = path.join(__dirname, 'cookies.txt');
 
-// Inițializare OpenAI
 const openai = new OpenAI({
-    apiKey: process.env.OPENAI_API_KEY, // Citește cheia din Coolify
+    apiKey: process.env.OPENAI_API_KEY,
 });
 
-// 🍪 Funcție avansată de parsare Cookies
-function getCookieHeader() {
-    if (!fs.existsSync(COOKIES_PATH)) {
-        console.log('⚠️ Warning: cookies.txt lipsește!');
-        return '';
-    }
-    try {
-        const content = fs.readFileSync(COOKIES_PATH, 'utf8');
-        const lines = content.split('\n');
-        let cookieMap = new Map();
-
-        for (const line of lines) {
-            if (line.startsWith('#') || !line.trim()) continue;
-            const parts = line.split('\t');
-            if (parts.length >= 7) {
-                // Suprascriem duplicatele pentru a păstra ultimele valori
-                cookieMap.set(parts[5], parts[6]);
-            }
+// Funcție de curățare a subtitrărilor VTT (formatul YouTube)
+function cleanVttText(vttContent) {
+    const lines = vttContent.split('\n');
+    const uniqueLines = new Set();
+    
+    lines.forEach(line => {
+        line = line.trim();
+        // Eliminăm header-ul, timestamp-urile și liniile goale
+        if (!line || 
+            line.startsWith('WEBVTT') || 
+            line.startsWith('Kind:') || 
+            line.startsWith('Language:') || 
+            line.includes('-->') || 
+            /^\d+$/.test(line)) { // Elimină numerele de index
+            return;
         }
+        // Eliminăm tag-urile de stil <c>...</c> și alte tag-uri HTML
+        const cleanLine = line.replace(/<[^>]*>/g, '').trim();
+        if (cleanLine) uniqueLines.add(cleanLine);
+    });
+
+    return Array.from(uniqueLines).join(' ');
+}
+
+// ✅ Extragere Transcript folosind YT-DLP (Mult mai robust)
+async function getTranscriptWithYtDlp(url) {
+    return new Promise((resolve, reject) => {
+        const outputBase = `/tmp/transcript_${Date.now()}`;
         
-        let cookieString = '';
-        cookieMap.forEach((value, key) => {
-            cookieString += `${key}=${value}; `;
+        // Comanda: descarcă DOAR subtitrarea, nu video-ul
+        // --write-subs: subtitrări manuale
+        // --write-auto-subs: subtitrări automate (AICI E CHEIA)
+        // --sub-lang "en,ro,.*": încearcă engleză, română, sau orice altceva
+        const args = [
+            '--no-warnings',
+            '--no-check-certificates',
+            '--force-ipv4',
+            '--skip-download',      // Nu vrem video
+            '--write-subs',         // Vrem subs manuale
+            '--write-auto-subs',    // Vrem subs automate
+            '--sub-lang', 'en,ro,.*', // Acceptăm orice limbă, preferabil en/ro
+            '--sub-format', 'vtt',  // Format text standard
+            '--output', outputBase, // Unde salvăm
+            url
+        ];
+
+        // 🍪 Dacă avem cookies, le folosim! Asta rezolvă "Sign in"
+        if (fs.existsSync(COOKIES_PATH)) {
+            args.push('--cookies', COOKIES_PATH);
+            args.push('--user-agent', 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36');
+        }
+
+        console.log('running yt-dlp for transcript...');
+        const process = spawn(YTDLP_PATH, args);
+
+        process.on('close', (code) => {
+            // Căutăm fișierul generat (poate fi .en.vtt, .ro.vtt, .vtt etc.)
+            const dir = '/tmp';
+            try {
+                const files = fs.readdirSync(dir);
+                // Căutăm fișierul care începe cu ID-ul nostru temporar
+                const transcriptFile = files.find(f => f.startsWith(path.basename(outputBase)) && f.endsWith('.vtt'));
+
+                if (transcriptFile) {
+                    const fullPath = path.join(dir, transcriptFile);
+                    const content = fs.readFileSync(fullPath, 'utf8');
+                    
+                    // Curățăm fișierul temporar
+                    fs.unlinkSync(fullPath);
+                    
+                    // Procesăm textul
+                    const cleanText = cleanVttText(content);
+                    console.log(`✅ Transcript extras via yt-dlp! Lungime: ${cleanText.length}`);
+                    resolve(cleanText);
+                } else {
+                    console.error('❌ yt-dlp nu a salvat niciun fișier .vtt');
+                    resolve(null);
+                }
+            } catch (err) {
+                console.error('❌ Eroare citire fișier transcript:', err);
+                resolve(null);
+            }
         });
-        
-        console.log(`🍪 Cookies parsate: ${cookieMap.size} valori găsite.`);
-        return cookieString;
-    } catch (e) {
-        console.error('❌ Eroare parsare cookies:', e);
-        return '';
-    }
+    });
 }
 
-// Configurare yt-dlp
-function getYtDlpArgs() {
-    const args = [
-        '--no-warnings',
-        '--no-check-certificates',
-        '--force-ipv4',
-        '--user-agent', 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
-        '--referer', 'https://www.youtube.com/',
-    ];
-    if (fs.existsSync(COOKIES_PATH)) {
-        args.push('--cookies', COOKIES_PATH);
-    }
-    return args;
-}
-
-// 🧠 Funcție Procesare GPT-4o-mini
+// 🧠 Funcție Procesare GPT
 async function processWithGPT(text) {
-    if (!process.env.OPENAI_API_KEY) {
-        return text + "\n\n(Nota: Traducerea AI nu a rulat. Adaugă OPENAI_API_KEY în Coolify.)";
-    }
+    if (!process.env.OPENAI_API_KEY) return text + "\n(Lipsă API Key)";
     if (!text || text.length < 10) return text;
 
-    console.log('🤖 Trimit textul la GPT-4o-mini...');
+    console.log('🤖 Trimit textul la GPT...');
     try {
         const completion = await openai.chat.completions.create({
             model: "gpt-4o-mini",
             messages: [
-                { 
-                    role: "system", 
-                    content: "Ești un editor expert. Primești un transcript brut de YouTube. Sarcina ta este să îl corectezi gramatical, să îl formatezi frumos și să îl traduci în limba Română (dacă nu e deja). Păstrează tonul original. Nu adăuga comentarii extra, doar textul curat." 
-                },
-                { 
-                    role: "user", 
-                    content: text 
-                }
+                { role: "system", content: "Ești un editor. Formatează textul, corectează-l și tradu-l în Română. Fără alte comentarii." },
+                { role: "user", content: text }
             ],
-            max_tokens: 1000,
+            max_tokens: 1500,
         });
-        console.log('✨ GPT a răspuns!');
         return completion.choices[0].message.content;
     } catch (e) {
         console.error('❌ Eroare OpenAI:', e.message);
-        return text; // Returnăm textul original dacă AI-ul eșuează
-    }
-}
-
-// ✅ Extragere Transcript
-// ✅ METODA DE TRANSCRIPT (ACTUALIZATĂ SĂ IA ORICE LIMBĂ)
-async function getTranscript(url) {
-    console.log('🔍 Încep extragerea transcriptului...');
-    
-    // 1. Curățare URL (transformă Shorts în Video normal)
-    let videoId = '';
-    try {
-        if (url.includes('shorts/')) videoId = url.split('shorts/')[1].split('?')[0];
-        else if (url.includes('v=')) videoId = url.split('v=')[1].split('&')[0];
-        else if (url.includes('youtu.be/')) videoId = url.split('youtu.be/')[1].split('?')[0];
-    } catch (e) {}
-
-    const targetUrl = videoId ? `https://www.youtube.com/watch?v=${videoId}` : url;
-    
-    // Luăm cookie-urile (foarte important să nu le ștergi codul de sus care le citește)
-    const cookieHeader = getCookieHeader();
-
-    // Configurare Request - FĂRĂ restricție de limbă
-    const fetchOpts = {
-        // lang: 'en', // ❌ AM SCOS ASTA! Acum va lua default-ul (Auto-generated)
-        fetchOptions: {
-            headers: {
-                'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
-                'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
-                'Accept-Language': 'en-US,en;q=0.9', // Asta e doar pentru interfață, nu pentru transcript
-                'Cookie': cookieHeader
-            }
-        }
-    };
-
-    try {
-        console.log(`ℹ️ Încerc extragerea de pe URL curat: ${targetUrl}`);
-        
-        // Încercare 1: Cerem transcriptul fără să specificăm limba
-        const items = await YoutubeTranscript.fetchTranscript(targetUrl, fetchOpts);
-        
-        console.log('✅ Transcript găsit!');
-        return items.map(i => i.text).join(' ');
-
-    } catch (e) {
-        console.error('❌ Eroare transcript (URL):', e.message);
-        
-        // Încercare 2: Dacă eșuează, încercăm direct cu ID-ul (uneori librăria preferă ID-ul)
-        if (videoId) {
-            console.log('🔄 Retry folosind doar Video ID...');
-            try {
-                const items = await YoutubeTranscript.fetchTranscript(videoId, fetchOpts);
-                console.log('✅ Transcript găsit la retry!');
-                return items.map(i => i.text).join(' ');
-            } catch (err2) {
-                console.error('❌ A eșuat și retry-ul:', err2.message);
-                
-                // Încercare 3 (Disperată): Încercăm să cerem explicit 'en' doar dacă default a eșuat
-                // Uneori "Auto-generated" e ascuns și trebuie forțat
-                try {
-                    console.log('🔄 Retry final forțând limba engleză...');
-                    const items = await YoutubeTranscript.fetchTranscript(videoId, { ...fetchOpts, lang: 'en' });
-                    return items.map(i => i.text).join(' ');
-                } catch(err3) {
-                     return null;
-                }
-            }
-        }
-        return null;
+        return text;
     }
 }
 
 async function getYtMetadata(url) {
     try {
-        const oembed = await fetch(`https://www.youtube.com/oembed?url=${url}&format=json`);
-        const data = await oembed.json();
-        return { title: data.title, duration_string: "--:--" };
+        // Folosim tot yt-dlp pentru metadata ca e mai sigur
+        return new Promise(resolve => {
+            const p = spawn(YTDLP_PATH, ['--dump-json', '--no-warnings', url]);
+            let data = '';
+            p.stdout.on('data', d => data += d);
+            p.on('close', () => {
+                try {
+                    const json = JSON.parse(data);
+                    resolve({ title: json.title, duration: json.duration_string });
+                } catch { resolve({ title: "Video YouTube", duration: "--:--" }); }
+            });
+        });
     } catch (e) {
-        return { title: "YouTube Video", duration_string: "--:--" };
+        return { title: "YouTube Video", duration: "--:--" };
     }
 }
 
@@ -188,26 +156,17 @@ app.get('/api/download', async (req, res) => {
 
     try {
         const metadata = await getYtMetadata(videoUrl);
+        console.log('📝 Titlu:', metadata.title);
         
-        // 1. Luăm transcriptul brut
-        let transcript = await getTranscript(videoUrl);
+        // 1. Încercăm extragerea cu yt-dlp + cookies
+        let transcript = await getTranscriptWithYtDlp(videoUrl);
         let processedTranscript = "";
 
         if (transcript) {
-            // 2. Curățăm textul brut
-            transcript = transcript
-                .replace(/&amp;/g, '&')
-                .replace(/&#39;/g, "'")
-                .replace(/&quot;/g, '"')
-                .replace(/\[.*?\]/g, "");
-            
-            console.log(`📜 Transcript brut lungime: ${transcript.length}`);
-
-            // 3. Trimitem la GPT pentru traducere/formatare
+            // 2. GPT Processing
             processedTranscript = await processWithGPT(transcript);
         } else {
-            console.log('⚠️ Nu există transcript.');
-            processedTranscript = "Nu am putut extrage transcriptul pentru acest video.";
+            processedTranscript = "Nu am putut extrage transcriptul. Asigură-te că video-ul are CC (chiar și auto-generated).";
         }
 
         const qualities = ['360', '480', '720', '1080'];
@@ -227,9 +186,9 @@ app.get('/api/download', async (req, res) => {
             status: 'ok',
             data: {
                 title: metadata.title,
-                duration: metadata.duration_string,
+                duration: metadata.duration,
                 formats: formats,
-                transcript: processedTranscript // Aici vine textul de la GPT
+                transcript: processedTranscript
             }
         });
 
@@ -248,11 +207,18 @@ app.get('/api/stream', (req, res) => {
     res.setHeader('Content-Type', isAudio ? 'audio/mpeg' : 'video/mp4');
 
     const args = [
-        ...getYtDlpArgs(),
+        '--no-warnings',
+        '--no-check-certificates',
+        '--force-ipv4',
+        '--referer', 'https://www.youtube.com/',
         '-o', '-',
         '-f', isAudio ? 'bestaudio' : 'best',
         videoUrl
     ];
+    
+    if (fs.existsSync(COOKIES_PATH)) {
+        args.push('--cookies', COOKIES_PATH);
+    }
 
     const streamProcess = spawn(YTDLP_PATH, args);
     streamProcess.stdout.pipe(res);
