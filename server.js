@@ -102,10 +102,11 @@ async function processWithGPT(text) {
 }
 
 // ✅ Extragere Transcript
+// ✅ METODA DE TRANSCRIPT (ACTUALIZATĂ SĂ IA ORICE LIMBĂ)
 async function getTranscript(url) {
     console.log('🔍 Încep extragerea transcriptului...');
     
-    // 1. Curățare URL
+    // 1. Curățare URL (transformă Shorts în Video normal)
     let videoId = '';
     try {
         if (url.includes('shorts/')) videoId = url.split('shorts/')[1].split('?')[0];
@@ -114,37 +115,54 @@ async function getTranscript(url) {
     } catch (e) {}
 
     const targetUrl = videoId ? `https://www.youtube.com/watch?v=${videoId}` : url;
+    
+    // Luăm cookie-urile (foarte important să nu le ștergi codul de sus care le citește)
     const cookieHeader = getCookieHeader();
 
-    // Headers identice cu un browser real
+    // Configurare Request - FĂRĂ restricție de limbă
     const fetchOpts = {
-        lang: 'en', // Încearcă engleză prima dată
+        // lang: 'en', // ❌ AM SCOS ASTA! Acum va lua default-ul (Auto-generated)
         fetchOptions: {
             headers: {
                 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
-                'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8',
-                'Accept-Language': 'en-US,en;q=0.9',
+                'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
+                'Accept-Language': 'en-US,en;q=0.9', // Asta e doar pentru interfață, nu pentru transcript
                 'Cookie': cookieHeader
             }
         }
     };
 
     try {
-        // Încercare 1: Direct cu URL
-        const items = await YoutubeTranscript.fetchTranscript(targetUrl, fetchOpts);
-        return items.map(i => i.text).join(' ');
-    } catch (e) {
-        console.error('❌ Eroare transcript prima încercare:', e.message);
+        console.log(`ℹ️ Încerc extragerea de pe URL curat: ${targetUrl}`);
         
-        // Încercare 2: Doar cu Video ID (uneori merge mai bine)
+        // Încercare 1: Cerem transcriptul fără să specificăm limba
+        const items = await YoutubeTranscript.fetchTranscript(targetUrl, fetchOpts);
+        
+        console.log('✅ Transcript găsit!');
+        return items.map(i => i.text).join(' ');
+
+    } catch (e) {
+        console.error('❌ Eroare transcript (URL):', e.message);
+        
+        // Încercare 2: Dacă eșuează, încercăm direct cu ID-ul (uneori librăria preferă ID-ul)
         if (videoId) {
-            console.log('🔄 Retry cu Video ID...');
+            console.log('🔄 Retry folosind doar Video ID...');
             try {
                 const items = await YoutubeTranscript.fetchTranscript(videoId, fetchOpts);
+                console.log('✅ Transcript găsit la retry!');
                 return items.map(i => i.text).join(' ');
             } catch (err2) {
-                console.error('❌ A eșuat și retry-ul.');
-                return null;
+                console.error('❌ A eșuat și retry-ul:', err2.message);
+                
+                // Încercare 3 (Disperată): Încercăm să cerem explicit 'en' doar dacă default a eșuat
+                // Uneori "Auto-generated" e ascuns și trebuie forțat
+                try {
+                    console.log('🔄 Retry final forțând limba engleză...');
+                    const items = await YoutubeTranscript.fetchTranscript(videoId, { ...fetchOpts, lang: 'en' });
+                    return items.map(i => i.text).join(' ');
+                } catch(err3) {
+                     return null;
+                }
             }
         }
         return null;
