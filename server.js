@@ -16,67 +16,94 @@ app.use(express.static(__dirname));
 const YTDLP_PATH = '/usr/local/bin/yt-dlp';
 const COOKIES_PATH = path.join(__dirname, 'cookies.txt');
 
+// 🍪 Funcție care transformă cookies.txt în String pentru Header
+function getCookieHeader() {
+    if (!fs.existsSync(COOKIES_PATH)) {
+        console.log('⚠️ Nu am găsit cookies.txt! Transcriptul poate eșua pe VPS.');
+        return '';
+    }
+
+    try {
+        const content = fs.readFileSync(COOKIES_PATH, 'utf8');
+        const lines = content.split('\n');
+        let cookieString = '';
+
+        for (const line of lines) {
+            // Ignorăm comentariile și liniile goale
+            if (line.startsWith('#') || !line.trim()) continue;
+            
+            const parts = line.split('\t');
+            // Formatul Netscape are 7 coloane, cookie-ul e pe coloanele 5 (nume) și 6 (valoare)
+            if (parts.length >= 7) {
+                const name = parts[5];
+                const value = parts[6];
+                cookieString += `${name}=${value}; `;
+            }
+        }
+        console.log('🍪 Cookies încărcate cu succes pentru Request!');
+        return cookieString;
+    } catch (e) {
+        console.error('❌ Eroare parsare cookies:', e);
+        return '';
+    }
+}
+
 // Argumente standard pentru yt-dlp
 function getYtDlpArgs() {
     const args = [
         '--no-warnings',
         '--no-check-certificates',
         '--force-ipv4',
-        // User Agent de Android pentru a evita blocajele la download
-        '--user-agent', 'Mozilla/5.0 (Linux; Android 10; K) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Mobile Safari/537.36',
+        '--user-agent', 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
         '--referer', 'https://www.youtube.com/',
-        '--extractor-args', 'youtube:player_client=android', 
     ];
     
+    // Aici folosim fișierul direct pentru download (yt-dlp știe să îl citească)
     if (fs.existsSync(COOKIES_PATH)) {
         args.push('--cookies', COOKIES_PATH);
     }
     return args;
 }
 
-// ✅ METODA ACTUALIZATĂ: Gestionează Shorts si User-Agent
+// ✅ METODA DE TRANSCRIPT (Cu Cookies injectate)
 async function getTranscript(url) {
     console.log('🔍 Extrag transcript via youtube-transcript...');
     
-    // 1. Conversie URL din Shorts/Mobile în format standard watch?v=ID
-    // Asta ajuta libraria sa nu se blocheze in redirect-uri
+    // 1. Curățare URL
     let videoId = '';
     try {
-        if (url.includes('shorts/')) {
-            videoId = url.split('shorts/')[1].split('?')[0];
-        } else if (url.includes('v=')) {
-            videoId = url.split('v=')[1].split('&')[0];
-        } else if (url.includes('youtu.be/')) {
-            videoId = url.split('youtu.be/')[1].split('?')[0];
-        }
-    } catch (e) {
-        console.log('⚠️ Nu am putut parsa ID-ul, folosesc URL original');
-    }
+        if (url.includes('shorts/')) videoId = url.split('shorts/')[1].split('?')[0];
+        else if (url.includes('v=')) videoId = url.split('v=')[1].split('&')[0];
+        else if (url.includes('youtu.be/')) videoId = url.split('youtu.be/')[1].split('?')[0];
+    } catch (e) {}
 
-    // Dacă am găsit ID-ul, construim un URL curat, altfel îl folosim pe cel primit
     const cleanUrl = videoId ? `https://www.youtube.com/watch?v=${videoId}` : url;
-    console.log(`ℹ️ URL folosit pentru transcript: ${cleanUrl}`);
+    
+    // 2. Pregătim Cookies
+    const cookieHeader = getCookieHeader();
 
     try {
-        // 2. Apelăm librăria cu HEADERS DE BROWSER (Foarte important pe VPS!)
+        // 3. Facem request-ul CU COOKIES
+        // Asta îl face pe YouTube să creadă că ești logat
         const transcriptItems = await YoutubeTranscript.fetchTranscript(cleanUrl, {
             lang: 'en',
             fetchOptions: {
                 headers: {
-                    // Ne prefacem ca suntem un PC cu Chrome, nu un bot
                     'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
-                    'Accept-Language': 'en-US,en;q=0.9',
+                    'Cookie': cookieHeader // <--- Aici e secretul
                 }
             }
         });
         
         const fullText = transcriptItems.map(item => item.text).join(' ');
         
+        // Curățare text
         const cleanText = fullText
             .replace(/&amp;/g, '&')
             .replace(/&#39;/g, "'")
             .replace(/&quot;/g, '"')
-            .replace(/\[.*?\]/g, ""); 
+            .replace(/\[.*?\]/g, "")
+            .replace(/\(.*?\)/g, ""); // Scoate și parantezele rotunde
 
         console.log('✅ Transcript extras! Lungime:', cleanText.length);
         return cleanText;
@@ -84,26 +111,24 @@ async function getTranscript(url) {
     } catch (e) {
         console.error('❌ Eroare transcript:', e.message);
         
-        // Fallback: Uneori merge mai bine daca incercam explicit cu ID-ul, nu cu URL-ul
-        if (videoId && e.message.includes('Impossible to retrieve')) {
-             console.log('🔄 Încerc din nou folosind doar Video ID...');
+        // Retry logic doar pe ID dacă prima metodă eșuează
+        if (videoId && (e.message.includes('Impossible') || e.message.includes('disabled'))) {
+             console.log('🔄 Încerc din nou pe Video ID cu Cookies...');
              try {
                 const retryItems = await YoutubeTranscript.fetchTranscript(videoId, {
                     lang: 'en',
                     fetchOptions: {
                         headers: {
-                            'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'
+                            'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+                            'Cookie': cookieHeader
                         }
                     }
                 });
-                const retryText = retryItems.map(item => item.text).join(' ');
-                console.log('✅ Transcript extras la a doua încercare!');
-                return retryText;
+                return retryItems.map(item => item.text).join(' ');
              } catch (err2) {
                  console.error('❌ A eșuat și a doua oară.');
              }
         }
-        
         return null; 
     }
 }
@@ -130,9 +155,7 @@ app.get('/api/download', async (req, res) => {
         
         const transcript = await getTranscript(videoUrl);
         
-        if (!transcript) {
-            console.log('⚠️ Transcript indisponibil.');
-        }
+        if (!transcript) console.log('⚠️ Transcript indisponibil.');
 
         const qualities = ['360', '480', '720', '1080'];
         const formats = qualities.map(q => ({
@@ -153,7 +176,7 @@ app.get('/api/download', async (req, res) => {
                 title: metadata.title,
                 duration: metadata.duration_string,
                 formats: formats,
-                transcript: transcript || "Nu există transcript disponibil (sau YouTube a blocat accesul)."
+                transcript: transcript || "Nu s-a putut extrage transcriptul (Cookie check required)."
             }
         });
 
@@ -170,9 +193,8 @@ app.get('/api/stream', (req, res) => {
     res.setHeader('Content-Disposition', `attachment; filename="${isAudio ? 'audio.mp3' : 'video.mp4'}"`);
     res.setHeader('Content-Type', isAudio ? 'audio/mpeg' : 'video/mp4');
 
-    const streamingArgs = getYtDlpArgs();
     const args = [
-        ...streamingArgs,
+        ...getYtDlpArgs(),
         '-o', '-',
         '-f', isAudio ? 'bestaudio' : 'best',
         videoUrl
@@ -182,6 +204,7 @@ app.get('/api/stream', (req, res) => {
     streamProcess.stdout.pipe(res);
     
     streamProcess.stderr.on('data', (data) => {
+        // Ignoram erorile minore
         if(data.toString().includes('ERROR')) console.error('Stream Error:', data.toString());
     });
 
