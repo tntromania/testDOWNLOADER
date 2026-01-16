@@ -3,6 +3,8 @@ const cors = require('cors');
 const { spawn } = require('child_process');
 const path = require('path');
 const fs = require('fs');
+// 👇 AICI ESTE NOUTATEA
+const { YoutubeTranscript } = require('youtube-transcript');
 
 const app = express();
 const PORT = 3000;
@@ -15,16 +17,15 @@ app.use(express.static(__dirname));
 const YTDLP_PATH = '/usr/local/bin/yt-dlp';
 const COOKIES_PATH = path.join(__dirname, 'cookies.txt');
 
-// Argumente standard pentru yt-dlp
+// Argumente standard pentru yt-dlp (FOLOSITE DOAR LA DOWNLOAD ACUM)
 function getYtDlpArgs() {
     const args = [
         '--no-warnings',
         '--no-check-certificates',
         '--force-ipv4',
-        // Schimbăm user agent-ul pentru a părea un browser real
         '--user-agent', 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36',
         '--referer', 'https://www.youtube.com/',
-        // TRUCUL MAGIC: Spunem yt-dlp să folosească clientul de Android
+        // Truc extra pentru download ca sa nu fii blocat
         '--extractor-args', 'youtube:player_client=android', 
     ];
     
@@ -34,66 +35,33 @@ function getYtDlpArgs() {
     return args;
 }
 
-// SIMPLIFICAT: Extrage transcript direct cu --write-auto-sub
+// ✅ METODA NOUĂ: Extrage transcript folosind librăria (fără yt-dlp)
 async function getTranscript(url) {
-    return new Promise((resolve) => {
-        const args = [
-            ...getYtDlpArgs(),
-            '--skip-download',
-            '--write-auto-sub',
-            '--sub-lang', 'en',
-            '--sub-format', 'txt',
-            '--output', '/tmp/transcript_%(id)s',
-            '--print', 'id',
-            url
-        ];
-
-        console.log('🔍 Execut yt-dlp pentru transcript...');
-        const process = spawn(YTDLP_PATH, args);
+    console.log('🔍 Extrag transcript via youtube-transcript...');
+    try {
+        // Aceasta functie face request direct la API-ul de subtitrari
+        const transcriptItems = await YoutubeTranscript.fetchTranscript(url);
         
-        let videoId = '';
-        process.stdout.on('data', (data) => {
-            videoId = data.toString().trim();
-            console.log('📹 Video ID:', videoId);
-        });
+        // Unim bucatile de text
+        const fullText = transcriptItems.map(item => item.text).join(' ');
+        
+        // Curatam textul de caractere ciudate
+        const cleanText = fullText
+            .replace(/&amp;/g, '&')
+            .replace(/&#39;/g, "'")
+            .replace(/&quot;/g, '"')
+            .replace(/\[.*?\]/g, ""); // Scoate chestii gen [Music]
 
-        process.stderr.on('data', (data) => {
-            console.log('ℹ️ yt-dlp:', data.toString());
-        });
-
-        process.on('close', () => {
-            if (!videoId) {
-                console.log('❌ Nu am primit Video ID');
-                resolve(null);
-                return;
-            }
-
-            const txtFile = `/tmp/transcript_${videoId}.en.txt`;
-            
-            console.log('🔍 Caut fișierul:', txtFile);
-            
-            if (fs.existsSync(txtFile)) {
-                try {
-                    const content = fs.readFileSync(txtFile, 'utf8');
-                    console.log('✅ Transcript găsit! Dimensiune:', content.length, 'caractere');
-                    
-                    // Curățăm fișierul
-                    fs.unlinkSync(txtFile);
-                    
-                    resolve(content.trim());
-                } catch (e) {
-                    console.error('❌ Eroare citire:', e);
-                    resolve(null);
-                }
-            } else {
-                console.log('❌ Fișierul nu există:', txtFile);
-                resolve(null);
-            }
-        });
-    });
+        console.log('✅ Transcript extras! Lungime:', cleanText.length);
+        return cleanText;
+    } catch (e) {
+        console.error('❌ Eroare transcript:', e.message);
+        // Putem returna un mesaj user-ului sau null
+        return null; 
+    }
 }
 
-// Metadata
+// Metadata (Titlu etc.)
 async function getYtMetadata(url) {
     try {
         const oembed = await fetch(`https://www.youtube.com/oembed?url=${url}&format=json`);
@@ -115,12 +83,11 @@ app.get('/api/download', async (req, res) => {
         const metadata = await getYtMetadata(videoUrl);
         console.log('📝 Titlu:', metadata.title);
         
+        // Aici apelam noua functie de transcript
         const transcript = await getTranscript(videoUrl);
         
-        if (transcript) {
-            console.log('✅ Transcript extras cu succes!');
-        } else {
-            console.log('⚠️ Nu există transcript disponibil');
+        if (!transcript) {
+            console.log('⚠️ Nu am putut extrage transcriptul.');
         }
 
         const qualities = ['360', '480', '720', '1080'];
@@ -142,17 +109,18 @@ app.get('/api/download', async (req, res) => {
                 title: metadata.title,
                 duration: metadata.duration_string,
                 formats: formats,
-                transcript: transcript || "Nu există transcript disponibil pentru acest video."
+                // Trimitem mesaj daca e null
+                transcript: transcript || "Transcript indisponibil (Video-ul nu are subtitrări sau este blocat)."
             }
         });
 
     } catch (error) {
-        console.error('❌ Eroare:', error);
+        console.error('❌ Eroare generală:', error);
         res.status(500).json({ error: 'Eroare la procesare.' });
     }
 });
 
-// ENDPOINT STREAMING
+// ENDPOINT STREAMING (Asta a ramas pe yt-dlp)
 app.get('/api/stream', (req, res) => {
     const videoUrl = req.query.url;
     const isAudio = req.query.type === 'audio';
@@ -170,6 +138,13 @@ app.get('/api/stream', (req, res) => {
 
     const streamProcess = spawn(YTDLP_PATH, args);
     streamProcess.stdout.pipe(res);
+    
+    // Loguri pentru erori la stream
+    streamProcess.stderr.on('data', (data) => {
+        // Ignoram warning-urile, afisam doar erorile grave
+        if(data.toString().includes('ERROR')) console.error('Stream Error:', data.toString());
+    });
+
     req.on('close', () => streamProcess.kill());
 });
 
