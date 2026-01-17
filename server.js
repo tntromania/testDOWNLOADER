@@ -23,7 +23,7 @@ const openai = new OpenAI({
     apiKey: process.env.OPENAI_API_KEY,
 });
 
-// 1. Configurare Argumente YT-DLP (Optimizat)
+// 1. Configurare Argumente YT-DLP (Optimizat pentru viteză)
 function getFastArgs() {
     const args = [
         '--no-warnings', 
@@ -33,6 +33,7 @@ function getFastArgs() {
         '--compat-options', 'no-youtube-unavailable-videos',
         '--no-playlist' 
     ];
+    // Adăugăm Cookies dacă există (CRITIC PENTRU YOUTUBE)
     if (fs.existsSync(COOKIES_PATH)) {
         args.push('--cookies', COOKIES_PATH);
         args.push('--user-agent', 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36');
@@ -40,23 +41,27 @@ function getFastArgs() {
     return args;
 }
 
-// 2. Curățare VTT
+// 2. Funcție de curățare a subtitrărilor VTT
 function cleanVttText(vttContent) {
     const lines = vttContent.split('\n');
     const uniqueLines = new Set();
     lines.forEach(line => {
         line = line.trim();
+        // Eliminăm header-ul, timestamp-urile și liniile goale
         if (!line || line.startsWith('WEBVTT') || line.includes('-->') || /^\d+$/.test(line)) return;
+        // Eliminăm tag-urile HTML
         const cleanLine = line.replace(/<[^>]*>/g, '').trim();
         if (cleanLine) uniqueLines.add(cleanLine);
     });
     return Array.from(uniqueLines).join(' ');
 }
 
-// 3. Extragere Transcript (Doar YouTube)
+// 3. Extragere Transcript (Doar pentru YouTube)
 async function getTranscriptWithYtDlp(url) {
     return new Promise((resolve) => {
+        // Folosim un nume unic pentru fișierul temporar ca să nu se suprapună request-urile
         const outputBase = `/tmp/transcript_${Date.now()}_${Math.random().toString(36).substring(7)}`;
+        
         const args = [
             ...getFastArgs(),
             '--skip-download', 
@@ -75,12 +80,13 @@ async function getTranscriptWithYtDlp(url) {
             try {
                 if (!fs.existsSync(dir)) fs.mkdirSync(dir);
                 const files = fs.readdirSync(dir);
+                // Găsim fișierul creat
                 const transcriptFile = files.find(f => f.startsWith(path.basename(outputBase)) && f.endsWith('.vtt'));
                 
                 if (transcriptFile) {
                     const fullPath = path.join(dir, transcriptFile);
                     const content = fs.readFileSync(fullPath, 'utf8');
-                    fs.unlinkSync(fullPath);
+                    fs.unlinkSync(fullPath); // Curățăm imediat discul
                     resolve(cleanVttText(content));
                 } else {
                     resolve(null);
@@ -90,7 +96,7 @@ async function getTranscriptWithYtDlp(url) {
     });
 }
 
-// 4. Metadata RAPID
+// 4. Metadata RAPID (Titlu + Durată)
 async function getYtMetadata(url) {
     return new Promise(resolve => {
         const args = [
@@ -114,7 +120,7 @@ async function getYtMetadata(url) {
     });
 }
 
-// 5. Procesare GPT
+// 5. Procesare GPT (Traducere)
 async function processWithGPT(text) {
     if (!process.env.OPENAI_API_KEY) return "Traducere indisponibilă (Lipsă API Key)";
     if (!text || text.length < 5) return "Text prea scurt pentru traducere.";
@@ -123,7 +129,7 @@ async function processWithGPT(text) {
         const completion = await openai.chat.completions.create({
             model: "gpt-4o-mini",
             messages: [
-                { role: "system", content: "Ești un translator. Tradu direct în limba Română. Fără explicații." },
+                { role: "system", content: "Ești un translator. Tradu direct în limba Română. Fără explicații suplimentare." },
                 { role: "user", content: text }
             ],
             max_tokens: 1000,
@@ -140,7 +146,7 @@ app.get('/api/download', async (req, res) => {
     const videoUrl = req.query.url;
     if (!videoUrl) return res.status(400).json({ error: 'URL lipsă' });
 
-    // A. Check Cache
+    // A. Verificăm Cache-ul (Viteză instantă pentru link-uri repetate)
     if (memoryCache.has(videoUrl)) {
         console.log('⚡ Serving from CACHE!');
         return res.json(memoryCache.get(videoUrl));
@@ -148,24 +154,28 @@ app.get('/api/download', async (req, res) => {
 
     console.log('\n🎬 Processing:', videoUrl);
     
-    // B. Detect Platform
+    // B. Detectăm dacă e YouTube sau Altceva
     const isYoutube = videoUrl.includes('youtube.com') || videoUrl.includes('youtu.be');
     
     try {
         let metadata, rawTranscript = null;
 
         if (isYoutube) {
-            console.log("🔹 YouTube detectat: AI activat.");
+            // === SCENARIUL YOUTUBE (Lent: Metadata + Transcript + GPT) ===
+            console.log("🔹 YouTube detectat: Pornim motoarele pentru AI...");
+            
+            // Paralelizăm procesele pentru viteză
             [metadata, rawTranscript] = await Promise.all([
                 getYtMetadata(videoUrl),
                 getTranscriptWithYtDlp(videoUrl)
             ]);
         } else {
-            console.log("🔹 Non-YouTube: Skip AI. Download rapid.");
+            // === SCENARIUL TIKTOK/FB/INSTA (Instant: Doar Metadata) ===
+            console.log("🔹 Non-YouTube: Skip la transcript. Download rapid.");
             metadata = await getYtMetadata(videoUrl);
         }
         
-        // C. Translate if transcript exists
+        // C. Dacă avem transcript (doar la YT), îl traducem
         let transcriptObject = null;
         if (rawTranscript) {
             const translatedText = await processWithGPT(rawTranscript);
@@ -175,7 +185,7 @@ app.get('/api/download', async (req, res) => {
             };
         }
 
-        // D. Generate Links
+        // D. Generăm link-urile de stream
         const qualities = ['360', '480', '720', '1080'];
         const formats = qualities.map(q => ({
             quality: q + 'p', format: 'mp4',
@@ -183,17 +193,20 @@ app.get('/api/download', async (req, res) => {
         }));
         formats.push({ quality: '192', format: 'mp3', url: `/api/stream?url=${encodeURIComponent(videoUrl)}&type=audio` });
 
+        // E. Construim răspunsul
         const responseData = {
             status: 'ok',
             data: {
                 title: metadata.title,
                 duration: metadata.duration,
                 formats: formats,
-                transcript: transcriptObject
+                transcript: transcriptObject // Va fi null pentru TikTok/FB -> Frontend-ul îl ascunde automat
             }
         };
 
+        // F. Salvăm în cache
         memoryCache.set(videoUrl, responseData);
+        
         res.json(responseData);
 
     } catch (error) {
@@ -215,14 +228,17 @@ app.get('/api/stream', (req, res) => {
         ...getFastArgs(),
         '-o', '-',
         '-f', isAudio ? 'bestaudio' : 'best',
+        // Optimizări Buffer pentru start rapid la download
         '--buffer-size', '16K', 
         '--no-part', 
         videoUrl
     ];
 
     const streamProcess = spawn(YTDLP_PATH, args);
+    
     streamProcess.stdout.pipe(res);
     
+    // Log doar erori critice
     streamProcess.stderr.on('data', (d) => {
         if(d.toString().includes('ERROR')) console.error(d.toString());
     });
