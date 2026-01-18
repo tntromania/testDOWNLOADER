@@ -45,8 +45,7 @@ function isYoutubeUrl(url) {
     return /(youtube\.com|youtu\.be)/i.test(url);
 }
 
-// 🔥 CONFIGURARE ANTI-BAN & IOS
-// Argumente "Lightweight" & Anti-Ban
+// 🔥 CONFIGURARE ANTI-BAN & IOS/ANDROID
 function getFastArgs() {
     const args = [
         '--no-warnings', 
@@ -55,8 +54,7 @@ function getFastArgs() {
         '--compat-options', 'no-youtube-unavailable-videos',
         '--no-playlist',
         
-        // 🔥 MODIFICARE: Folosim 'android' în loc de 'ios'. 
-        // Android e mai stabil pentru Shorts și nu dă eroarea "Format not available" așa des.
+        // Păstrăm Android, e cel mai stabil acum
         '--extractor-args', 'youtube:player_client=android',
     ];
 
@@ -94,8 +92,7 @@ async function getTranscriptWithYtDlp(url) {
         ];
 
         const process = spawn(YTDLP_PATH, args);
-        process.stderr.on('data', (data) => console.error(`[Transcript Log]: ${data}`));
-
+        
         process.on('close', () => {
             const dir = '/tmp';
             try {
@@ -214,42 +211,66 @@ app.get('/api/download', async (req, res) => {
     }
 });
 
-// 🚀 ENDPOINT STREAMING (CU FFMPEG PENTRU SHORTS)
+// 🚀 ENDPOINT DOWNLOAD (RECRIS PENTRU STABILITATE)
 app.get('/api/stream', (req, res) => {
     const videoUrl = req.query.url;
     const isAudio = req.query.type === 'audio';
-    const filename = isAudio ? 'audio.mp3' : 'video.mp4';
     
-    res.setHeader('Content-Disposition', `attachment; filename="${filename}"`);
-    res.setHeader('Content-Type', isAudio ? 'audio/mpeg' : 'video/mp4');
-    
-    // 🔥 LOGICA NOUĂ: Dacă e video, încercăm să luăm MP4+M4A și să le unim cu FFmpeg
-    // Dacă e audio, luăm bestaudio
-    const formatSelection = isAudio 
-        ? 'bestaudio/best' 
-        : 'bv*[ext=mp4]+ba[ext=m4a]/b[ext=mp4] / bv*+ba/b';
+    // Generăm un nume de fișier temporar unic
+    const tempFilename = `download_${Date.now()}_${Math.random().toString(36).substr(7)}.${isAudio ? 'mp3' : 'mp4'}`;
+    const tempPath = path.join('/tmp', tempFilename);
 
+    console.log(`⬇️ Start download în fișier temporar: ${tempPath}`);
+
+    // Construim argumentele pentru download PE DISC (nu stdout)
     const args = [
         ...getFastArgs(),
-        '-o', '-',
-        '-f', formatSelection,
-        '--buffer-size', '16K', 
-        '--no-part', 
-        videoUrl
+        '-o', tempPath, // Salvăm în fișier
     ];
 
-    const streamProcess = spawn(YTDLP_PATH, args);
-    streamProcess.stdout.pipe(res);
+    if (isAudio) {
+        args.push('-f', 'bestaudio/best');
+        args.push('-x', '--audio-format', 'mp3'); // Conversie la MP3
+    } else {
+        // Aici e magia: lăsăm yt-dlp să descarce video+audio separat și să le lipească
+        args.push('-f', 'bestvideo+bestaudio/best'); 
+        args.push('--merge-output-format', 'mp4'); // Forțăm container MP4 final
+    }
 
-    streamProcess.stderr.on('data', (data) => {
-        // Ignorăm warning-urile simple, afișăm doar erorile serioase
+    args.push(videoUrl);
+
+    // Pornim procesul de download
+    const dlProcess = spawn(YTDLP_PATH, args);
+
+    // Logăm erorile (dar nu oprim execuția pentru warning-uri)
+    dlProcess.stderr.on('data', (data) => {
         const msg = data.toString();
-        if (msg.includes('ERROR') || msg.includes('HTTP Error')) {
-            console.error(`[Stream Error]: ${msg}`);
-        }
+        // Filtrăm zgomotul, afișăm doar erorile
+        if (msg.includes('ERROR')) console.error(`[YT-DLP Error]: ${msg}`);
     });
 
-    req.on('close', () => streamProcess.kill());
+    dlProcess.on('close', (code) => {
+        if (code === 0 && fs.existsSync(tempPath)) {
+            console.log(`✅ Download complet. Se trimite fișierul...`);
+            
+            // Trimitem fișierul către client
+            res.download(tempPath, tempFilename, (err) => {
+                if (err) {
+                    console.error('Eroare la trimiterea fișierului:', err);
+                }
+                // 🔥 CRITIC: Ștergem fișierul după ce s-a terminat (sau a dat eroare)
+                try {
+                    if (fs.existsSync(tempPath)) fs.unlinkSync(tempPath);
+                    console.log(`🧹 Fișier temporar șters: ${tempPath}`);
+                } catch (e) { console.error('Nu s-a putut șterge temp file:', e); }
+            });
+        } else {
+            console.error(`❌ Download eșuat cu codul ${code}`);
+            res.status(500).send('Download Failed');
+            // Cleanup în caz de eroare
+            if (fs.existsSync(tempPath)) fs.unlinkSync(tempPath);
+        }
+    });
 });
 
 app.listen(PORT, '0.0.0.0', () => {
