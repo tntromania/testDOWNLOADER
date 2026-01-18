@@ -1,6 +1,6 @@
 const express = require('express');
 const cors = require('cors');
-const { spawn, exec } = require('child_process'); // Am adaugat exec pentru update
+const { spawn, exec } = require('child_process');
 const path = require('path');
 const fs = require('fs');
 const OpenAI = require('openai');
@@ -16,16 +16,16 @@ app.use(express.static(__dirname));
 const YTDLP_PATH = '/usr/local/bin/yt-dlp'; 
 const COOKIES_PATH = path.join(__dirname, 'cookies.txt');
 
-// ⚡ CACHE ÎN MEMORIE (Cu curățare automată)
+// ⚡ CACHE MEMORIE
 const memoryCache = new Map();
 
-// 🔥 FIX: Curățăm cache-ul la fiecare 24h ca să nu crape serverul de la memorie plină
+// Golire cache la 24h
 setInterval(() => {
     console.log('🧹 Golire cache automat...');
     memoryCache.clear();
 }, 24 * 60 * 60 * 1000);
 
-// 🔥 FIX: Endpoint pentru a actualiza yt-dlp manual sau prin cron
+// Endpoint Update Admin
 app.get('/api/admin/update-ytdlp', (req, res) => {
     exec(`${YTDLP_PATH} -U`, (error, stdout, stderr) => {
         if (error) {
@@ -45,24 +45,22 @@ function isYoutubeUrl(url) {
     return /(youtube\.com|youtu\.be)/i.test(url);
 }
 
-// Argumente "Lightweight" & Anti-Ban
+// 🔥 CONFIGURARE ANTI-BAN & IOS
 function getFastArgs() {
     const args = [
         '--no-warnings', 
         '--no-check-certificates', 
-        // ❌ SCOATE '--force-ipv4' (Lasă-l să folosească IPv6 dacă serverul are)
-        '--referer', 'https://www.youtube.com/', // Schimbat pe root
+        // NU folosim force-ipv4 pentru a evita ban-urile pe IP-uri de server
+        '--referer', 'https://www.youtube.com/',
         '--compat-options', 'no-youtube-unavailable-videos',
         '--no-playlist',
         
-        // ✅ TRUCUL MAGIC: Ne prefacem că suntem pe iPhone (evită eroarea 403)
+        // ✅ Emulare iOS pentru a evita eroarea 403
         '--extractor-args', 'youtube:player_client=ios',
     ];
 
     if (fs.existsSync(COOKIES_PATH)) {
         args.push('--cookies', COOKIES_PATH);
-        // ❌ NU mai pune User-Agent manual când folosim player_client=ios, 
-        // yt-dlp îl va pune pe cel corect automat.
     }
     
     return args;
@@ -95,9 +93,7 @@ async function getTranscriptWithYtDlp(url) {
         ];
 
         const process = spawn(YTDLP_PATH, args);
-        
-        // 🔥 DEBUG: Vedem erorile în logs dacă nu merge transcriptul
-        process.stderr.on('data', (data) => console.error(`[Transcript Error]: ${data}`));
+        process.stderr.on('data', (data) => console.error(`[Transcript Log]: ${data}`));
 
         process.on('close', () => {
             const dir = '/tmp';
@@ -119,7 +115,7 @@ async function getTranscriptWithYtDlp(url) {
     });
 }
 
-// Metadata RAPID
+// Metadata
 async function getYtMetadata(url) {
     return new Promise(resolve => {
         const args = [
@@ -133,7 +129,6 @@ async function getYtMetadata(url) {
         let errorData = '';
 
         p.stdout.on('data', d => data += d);
-        // 🔥 FIX: Capturăm eroarea reală
         p.stderr.on('data', d => errorData += d);
         
         p.on('close', (code) => {
@@ -141,9 +136,8 @@ async function getYtMetadata(url) {
             if (parts.length >= 2) {
                 resolve({ title: parts[0], duration: parts[1] });
             } else {
-                console.error(`❌ Metadata Failed for ${url}. Exit code: ${code}`);
-                console.error(`❌ STDERR: ${errorData}`); // Asta va aparea in Coolify logs
-                resolve({ title: "Video Download (Error)", duration: "--:--" });
+                console.error(`❌ Metadata Error: ${errorData}`);
+                resolve({ title: "Video Download (Procesare...)", duration: "--:--" });
             }
         });
     });
@@ -151,7 +145,7 @@ async function getYtMetadata(url) {
 
 async function processWithGPT(text) {
     if (!process.env.OPENAI_API_KEY) return "Traducere indisponibilă (No API Key).";
-    if (!text || text.length < 5) return "Text prea scurt pentru rezumat/traducere.";
+    if (!text || text.length < 5) return "Text prea scurt.";
 
     try {
         const completion = await openai.chat.completions.create({
@@ -173,7 +167,6 @@ app.get('/api/download', async (req, res) => {
     if (!videoUrl) return res.status(400).json({ error: 'URL lipsă' });
 
     if (memoryCache.has(videoUrl)) {
-        console.log('⚡ Serving from CACHE (Instant)!');
         return res.json(memoryCache.get(videoUrl));
     }
 
@@ -183,27 +176,14 @@ app.get('/api/download', async (req, res) => {
 
     try {
         let metadataPromise = getYtMetadata(videoUrl);
-        let transcriptPromise;
+        let transcriptPromise = isYt ? getTranscriptWithYtDlp(videoUrl) : Promise.resolve(null);
 
-        if (isYt) {
-            transcriptPromise = getTranscriptWithYtDlp(videoUrl);
-        } else {
-            transcriptPromise = Promise.resolve(null);
-        }
-
-        const [metadata, rawTranscript] = await Promise.all([
-            metadataPromise,
-            transcriptPromise
-        ]);
+        const [metadata, rawTranscript] = await Promise.all([metadataPromise, transcriptPromise]);
         
         let transcriptObject = null;
-
         if (rawTranscript) {
             const translatedText = await processWithGPT(rawTranscript);
-            transcriptObject = {
-                original: rawTranscript,
-                translated: translatedText
-            };
+            transcriptObject = { original: rawTranscript, translated: translatedText };
         }
 
         const qualities = ['360', '480', '720', '1080'];
@@ -224,43 +204,48 @@ app.get('/api/download', async (req, res) => {
         };
 
         memoryCache.set(videoUrl, responseData);
-        
         console.log(`✅ Gata în ${(Date.now() - startTime) / 1000}s`);
         res.json(responseData);
 
     } catch (error) {
-        console.error('❌ Eroare:', error);
+        console.error('❌ Eroare server:', error);
         res.status(500).json({ error: 'Eroare server.' });
     }
 });
 
-// 🚀 ENDPOINT STREAMING
+// 🚀 ENDPOINT STREAMING (CU FFMPEG PENTRU SHORTS)
 app.get('/api/stream', (req, res) => {
     const videoUrl = req.query.url;
     const isAudio = req.query.type === 'audio';
-    
     const filename = isAudio ? 'audio.mp3' : 'video.mp4';
     
-    // Nu setam Content-Length pentru ca e stream, dar setam tipul
     res.setHeader('Content-Disposition', `attachment; filename="${filename}"`);
     res.setHeader('Content-Type', isAudio ? 'audio/mpeg' : 'video/mp4');
     
+    // 🔥 LOGICA NOUĂ: Dacă e video, încercăm să luăm MP4+M4A și să le unim cu FFmpeg
+    // Dacă e audio, luăm bestaudio
+    const formatSelection = isAudio 
+        ? 'bestaudio/best' 
+        : 'bv*[ext=mp4]+ba[ext=m4a]/b[ext=mp4] / bv*+ba/b';
+
     const args = [
         ...getFastArgs(),
         '-o', '-',
-        '-f', isAudio ? 'bestaudio' : 'best',
+        '-f', formatSelection,
         '--buffer-size', '16K', 
         '--no-part', 
         videoUrl
     ];
 
     const streamProcess = spawn(YTDLP_PATH, args);
-    
     streamProcess.stdout.pipe(res);
 
-    // 🔥 FIX: Logam erorile de la stream ca sa intelegem de ce da 0 bytes
     streamProcess.stderr.on('data', (data) => {
-        console.error(`[Stream Error]: ${data}`);
+        // Ignorăm warning-urile simple, afișăm doar erorile serioase
+        const msg = data.toString();
+        if (msg.includes('ERROR') || msg.includes('HTTP Error')) {
+            console.error(`[Stream Error]: ${msg}`);
+        }
     });
 
     req.on('close', () => streamProcess.kill());
@@ -268,6 +253,4 @@ app.get('/api/stream', (req, res) => {
 
 app.listen(PORT, '0.0.0.0', () => {
     console.log(`🚀 Server TURBO pornit pe portul ${PORT}`);
-    // Optional: Ruleaza update la start
-    // exec(`${YTDLP_PATH} -U`); 
 });
