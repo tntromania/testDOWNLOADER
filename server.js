@@ -46,17 +46,18 @@ function isYoutubeUrl(url) {
 }
 
 // 🔥 CONFIGURARE ANTI-BAN & IOS
+// Argumente "Lightweight" & Anti-Ban
 function getFastArgs() {
     const args = [
         '--no-warnings', 
         '--no-check-certificates', 
-        // NU folosim force-ipv4 pentru a evita ban-urile pe IP-uri de server
         '--referer', 'https://www.youtube.com/',
         '--compat-options', 'no-youtube-unavailable-videos',
         '--no-playlist',
         
-        // ✅ Emulare iOS pentru a evita eroarea 403
-        '--extractor-args', 'youtube:player_client=ios',
+        // 🔥 MODIFICARE: Folosim 'android' în loc de 'ios'. 
+        // Android e mai stabil pentru Shorts și nu dă eroarea "Format not available" așa des.
+        '--extractor-args', 'youtube:player_client=android',
     ];
 
     if (fs.existsSync(COOKIES_PATH)) {
