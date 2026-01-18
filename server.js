@@ -54,8 +54,10 @@ function getFastArgs() {
         '--referer', 'https://www.youtube.com/',
         '--compat-options', 'no-youtube-unavailable-videos',
         '--no-playlist',
+        '--geo-bypass', // Adaugat pentru siguranta
         
-        // Păstrăm Android, e cel mai stabil acum
+        // Păstrăm Android, e cel mai stabil, dar adăugăm și impersonare de browser desktop
+        '--user-agent', 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
         '--extractor-args', 'youtube:player_client=android',
     ];
 
@@ -212,7 +214,7 @@ app.get('/api/download', async (req, res) => {
     }
 });
 
-// 🚀 ENDPOINT DOWNLOAD (RECRIS PENTRU STABILITATE)
+// 🚀 ENDPOINT DOWNLOAD (RECRIS PENTRU STABILITATE 2026)
 app.get('/api/stream', (req, res) => {
     const videoUrl = req.query.url;
     const isAudio = req.query.type === 'audio';
@@ -223,19 +225,24 @@ app.get('/api/stream', (req, res) => {
 
     console.log(`⬇️ Start download în fișier temporar: ${tempPath}`);
 
-    // Construim argumentele pentru download PE DISC (nu stdout)
+    // Construim argumentele pentru download PE DISC
     const args = [
         ...getFastArgs(),
-        '-o', tempPath, // Salvăm în fișier
+        '-o', tempPath,
     ];
 
     if (isAudio) {
         args.push('-f', 'bestaudio/best');
-        args.push('-x', '--audio-format', 'mp3'); // Conversie la MP3
+        args.push('-x', '--audio-format', 'mp3');
     } else {
-        // Aici e magia: lăsăm yt-dlp să descarce video+audio separat și să le lipească
-        args.push('-f', 'bestvideo+bestaudio/best'); 
-        args.push('--merge-output-format', 'mp4'); // Forțăm container MP4 final
+        // 🔥 AICI E FIX-UL MAGIC
+        // Schimbam 'bestvideo+bestaudio' cu 'bv*+ba'
+        // 'bv*' prinde orice stream video valid, chiar daca YouTube nu il marcheaza ca 'best'
+        // '/b' este fallback-ul final (pre-muxed)
+        args.push('-f', 'bv*+ba/b'); 
+        
+        // Asigurăm container MP4. Dacă nu poate face merge direct, face recode (mai sigur)
+        args.push('--merge-output-format', 'mp4');
     }
 
     args.push(videoUrl);
@@ -243,32 +250,28 @@ app.get('/api/stream', (req, res) => {
     // Pornim procesul de download
     const dlProcess = spawn(YTDLP_PATH, args);
 
-    // Logăm erorile (dar nu oprim execuția pentru warning-uri)
+    // Logăm erorile detaliat
     dlProcess.stderr.on('data', (data) => {
         const msg = data.toString();
-        // Filtrăm zgomotul, afișăm doar erorile
-        if (msg.includes('ERROR')) console.error(`[YT-DLP Error]: ${msg}`);
+        // Ignorăm warning-urile uzuale, afișăm doar erorile reale
+        if (msg.includes('ERROR') || msg.includes('WARNING')) console.log(`[YT-DLP Log]: ${msg.trim()}`);
     });
 
     dlProcess.on('close', (code) => {
         if (code === 0 && fs.existsSync(tempPath)) {
             console.log(`✅ Download complet. Se trimite fișierul...`);
             
-            // Trimitem fișierul către client
             res.download(tempPath, tempFilename, (err) => {
-                if (err) {
-                    console.error('Eroare la trimiterea fișierului:', err);
-                }
-                // 🔥 CRITIC: Ștergem fișierul după ce s-a terminat (sau a dat eroare)
+                if (err) console.error('Eroare la trimiterea fișierului:', err);
+                
+                // Ștergem fișierul imediat după trimitere
                 try {
                     if (fs.existsSync(tempPath)) fs.unlinkSync(tempPath);
-                    console.log(`🧹 Fișier temporar șters: ${tempPath}`);
                 } catch (e) { console.error('Nu s-a putut șterge temp file:', e); }
             });
         } else {
             console.error(`❌ Download eșuat cu codul ${code}`);
-            res.status(500).send('Download Failed');
-            // Cleanup în caz de eroare
+            res.status(500).send('Download Failed - Format Error');
             if (fs.existsSync(tempPath)) fs.unlinkSync(tempPath);
         }
     });
