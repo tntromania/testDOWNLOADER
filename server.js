@@ -13,7 +13,8 @@ app.use(express.json());
 app.use(express.static(path.join(__dirname, 'public'))); 
 app.use(express.static(__dirname));
 
-const YTDLP_PATH = '/usr/local/bin/yt-dlp'; 
+// Calea standard când instalezi prin pip sau apt
+const YTDLP_PATH = 'yt-dlp';
 const COOKIES_PATH = path.join(__dirname, 'cookies.txt');
 
 // ⚡ CACHE MEMORIE
