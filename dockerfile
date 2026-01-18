@@ -1,20 +1,23 @@
-# Folosim versiunea FULL de Node/Debian, nu slim
-FROM node:18-bullseye
+# Folosim Debian 12 (Bookworm) care are Python 3.11 nativ
+FROM node:20-bookworm
 
-# 1. Instalăm Python3, Pip și FFmpeg
+# 1. Instalăm Python, Pip și FFmpeg
+# 'python3-full' este necesar pe Bookworm pentru venv
 RUN apt-get update && apt-get install -y \
     python3 \
     python3-pip \
+    python3-full \
     ffmpeg \
     atomicparsley \
+    curl \
     && rm -rf /var/lib/apt/lists/*
 
-# 2. Instalăm yt-dlp prin PIP (Mult mai stabil decât curl binary)
-# Asta ne asigură că avem ultima versiune compatibilă cu Python-ul instalat
-RUN python3 -m pip install -U yt-dlp
+# 2. Instalăm yt-dlp prin PIP (cea mai nouă versiune)
+# Folosim --break-system-packages pentru că suntem în Docker și nu ne pasă de mediul izolat
+RUN python3 -m pip install -U yt-dlp --break-system-packages
 
-# Facem un symlink ca să fim siguri că server.js îl găsește la calea veche
-RUN ln -s /usr/local/bin/yt-dlp /usr/bin/yt-dlp
+# Verificăm unde s-a instalat (de obicei în /usr/local/bin)
+RUN which yt-dlp
 
 WORKDIR /app
 
