@@ -45,20 +45,26 @@ function isYoutubeUrl(url) {
     return /(youtube\.com|youtu\.be)/i.test(url);
 }
 
+// Argumente "Lightweight" & Anti-Ban
 function getFastArgs() {
     const args = [
         '--no-warnings', 
         '--no-check-certificates', 
-        '--force-ipv4', 
-        '--referer', 'https://www.google.com/',
+        // ❌ SCOATE '--force-ipv4' (Lasă-l să folosească IPv6 dacă serverul are)
+        '--referer', 'https://www.youtube.com/', // Schimbat pe root
         '--compat-options', 'no-youtube-unavailable-videos',
-        '--no-playlist'
+        '--no-playlist',
+        
+        // ✅ TRUCUL MAGIC: Ne prefacem că suntem pe iPhone (evită eroarea 403)
+        '--extractor-args', 'youtube:player_client=ios',
     ];
+
     if (fs.existsSync(COOKIES_PATH)) {
         args.push('--cookies', COOKIES_PATH);
-        // 🔥 User Agent mai nou pentru a pacali YouTube
-        args.push('--user-agent', 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/123.0.0.0 Safari/537.36');
+        // ❌ NU mai pune User-Agent manual când folosim player_client=ios, 
+        // yt-dlp îl va pune pe cel corect automat.
     }
+    
     return args;
 }
 
