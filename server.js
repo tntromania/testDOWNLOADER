@@ -14,10 +14,11 @@ app.use(express.json());
 app.use(express.static(path.join(__dirname, 'public')));
 app.use(express.static(__dirname));
 
-// --- CONFIGURARE ---
+// --- CONFIGURARE NOUĂ ---
 const YTDLP_PATH = '/usr/local/bin/yt-dlp'; 
 const RAPIDAPI_KEY = '7efb2ec2c9msh9064cf9c42d6232p172418jsn9da8ae5664d3';
-const RAPIDAPI_HOST = 'youtube-info-download-api.p.rapidapi.com';
+// API-ul nou: youtube-mp41
+const RAPIDAPI_HOST = 'youtube-mp41.p.rapidapi.com';
 
 const openai = new OpenAI({
     apiKey: process.env.OPENAI_API_KEY,
@@ -25,13 +26,11 @@ const openai = new OpenAI({
 
 const metadataCache = new Map();
 
-// --- HELPER: Curățare URL (Transformă Shorts în Watch) ---
+// --- HELPER: Curățare URL ---
 function sanitizeUrl(url) {
     if (!url) return "";
-    // Dacă e link de shorts, îl facem link normal
     if (url.includes('/shorts/')) {
         const parts = url.split('/shorts/');
-        // Luăm ID-ul video-ului (până la primul semn de întrebare dacă există)
         const videoId = parts[1].split('?')[0];
         return `https://www.youtube.com/watch?v=${videoId}`;
     }
@@ -54,16 +53,16 @@ function cleanVttText(vttContent) {
 async function getTitleFromHTML(url) {
     try {
         const response = await axios.get(url, {
-            headers: { 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) Chrome/120.0.0.0 Safari/537.36' }
+            headers: { 'User-Agent': 'Mozilla/5.0' }
         });
         const html = response.data;
         const match = html.match(/<title>(.*?)<\/title>/);
-        if (match && match[1]) return match[1].replace(' - YouTube', '').replace('on TikTok', '').trim();
+        if (match && match[1]) return match[1].replace(' - YouTube', '').trim();
         return "Video (Titlu indisponibil)";
     } catch (e) { return "Video (Titlu indisponibil)"; }
 }
 
-// 2. Extragere Titlu via yt-dlp
+// 2. Metadata Local
 async function getLocalMetadata(url) {
     return new Promise((resolve) => {
         const args = ['--dump-json', '--skip-download', '--extractor-args', 'youtube:player_client=android', url];
@@ -75,7 +74,6 @@ async function getLocalMetadata(url) {
                 const json = JSON.parse(data);
                 resolve({ title: json.title, duration: json.duration_string });
             } catch (e) {
-                console.log('⚠️ yt-dlp blocat. Folosim HTML fallback.');
                 const backupTitle = await getTitleFromHTML(url);
                 resolve({ title: backupTitle, duration: "--:--" });
             }
@@ -120,15 +118,11 @@ async function processWithGPT(text) {
     } catch (e) { return "Eroare GPT."; }
 }
 
-// --- ENDPOINTS ---
-
+// --- INFO ENDPOINT ---
 app.get('/api/info', async (req, res) => {
     const rawUrl = req.query.url;
     if (!rawUrl) return res.status(400).json({ error: 'URL lipsă' });
-
-    // Curățăm URL-ul pentru Shorts
     const url = sanitizeUrl(rawUrl);
-    console.log(`🔍 Info request (Sanitized): ${url}`);
 
     if (metadataCache.has(url)) return res.json(metadataCache.get(url));
 
@@ -145,84 +139,94 @@ app.get('/api/info', async (req, res) => {
     } catch (e) { res.status(500).json({ error: 'Eroare server' }); }
 });
 
-// FUNCȚIE RETRY CU DEBUGGING COMPLET
-async function fetchFromRapidAPI(url, type, quality) {
-    // Ordinea de încercare
-    let qualitiesToTry = [quality];
-    if (quality === '1080p') qualitiesToTry = ['1080p', '720p', '480p']; 
-    if (quality === '720p') qualitiesToTry = ['720p', '480p'];
+// --- LOGICA NOUĂ: QUEUE & POLL ---
 
-    for (const q of qualitiesToTry) {
+// Pasul 1: Start Job
+async function startConversion(url) {
+    try {
+        console.log(`🚀 [API Nou] Start conversie: ${url}`);
+        // Endpoint-ul standard pentru acest tip de API este de obicei /api/v1/url sau /api/v1/init
+        // Verificăm documentația, dar de obicei ID-ul se obține așa:
+        const response = await axios.get(`https://${RAPIDAPI_HOST}/api/v1/url`, {
+            params: { url: url },
+            headers: { 'x-rapidapi-host': RAPIDAPI_HOST, 'x-rapidapi-key': RAPIDAPI_KEY }
+        });
+        
+        // API-ul returnează de obicei un ID
+        if (response.data && response.data.id) {
+            return response.data.id;
+        }
+        throw new Error("Nu am primit Job ID: " + JSON.stringify(response.data));
+    } catch (error) {
+        console.error("❌ Eroare Start Job:", error.response ? error.response.data : error.message);
+        return null;
+    }
+}
+
+// Pasul 2: Verificare Progres (Loop)
+async function pollProgress(id) {
+    let attempts = 0;
+    const maxAttempts = 30; // Așteptăm maxim 30-60 secunde
+
+    while (attempts < maxAttempts) {
         try {
-            console.log(`⏳ [RapidAPI] Cerere calitate: ${q} | URL: ${url}`);
+            console.log(`⏳ [API Nou] Checking progress ID: ${id} (Încercarea ${attempts})`);
             
-            const params = { 
-                url: url, 
-                format: type === 'audio' ? 'mp3' : 'mp4' 
-            };
-            
-            // Logica specifică API-ului
-            if (type === 'audio') {
-                params.audio_quality = '128';
-            } else {
-                params.video_quality = q; // API-ul așteaptă '1080p', '720p' etc.
-            }
-
-            const response = await axios.get(`https://${RAPIDAPI_HOST}/ajax/download.php`, {
-                params: params,
-                headers: { 
-                    'x-rapidapi-host': RAPIDAPI_HOST, 
-                    'x-rapidapi-key': RAPIDAPI_KEY 
-                }
+            const response = await axios.get(`https://${RAPIDAPI_HOST}/api/v1/progress`, {
+                params: { id: id },
+                headers: { 'x-rapidapi-host': RAPIDAPI_HOST, 'x-rapidapi-key': RAPIDAPI_KEY }
             });
 
             const data = response.data;
             
-            // VERIFICĂM RĂSPUNSUL
-            if (data && (data.url || data.link) && data.success !== false) {
-                console.log(`✅ [RapidAPI] SUCCES! Link primit: ${data.url || data.link}`);
-                return data.url || data.link;
-            } else {
-                console.log(`❌ [RapidAPI] Eșec logic:`, JSON.stringify(data));
+            // Statusurile pot varia: 'working', 'processing', 'finished', 'success'
+            if (data.status === 'success' || data.status === 'finished') {
+                console.log(`✅ GATA! URL: ${data.url}`);
+                return data.url;
+            }
+            
+            if (data.status === 'fail' || data.error) {
+                console.error("❌ Conversie eșuată:", data);
+                return null;
             }
 
-        } catch (err) {
-            // AICI VEDEM DE CE CRAPĂ
-            if (err.response) {
-                // Serverul a răspuns cu un cod de eroare (4xx, 5xx)
-                console.log(`🔥 [RapidAPI] Eroare HTTP ${err.response.status}:`, err.response.data);
-            } else if (err.request) {
-                // Nu s-a primit niciun răspuns
-                console.log(`🔥 [RapidAPI] Timeout / No Response.`);
-            } else {
-                // Eroare de configurare
-                console.log(`🔥 [RapidAPI] Eroare Config: ${err.message}`);
-            }
+            // Așteptăm 2 secunde înainte de următoarea verificare
+            await new Promise(r => setTimeout(r, 2000));
+            attempts++;
+
+        } catch (error) {
+            console.error("⚠️ Eroare polling:", error.message);
+            await new Promise(r => setTimeout(r, 2000));
+            attempts++;
         }
     }
     return null;
 }
 
 app.get('/api/convert', async (req, res) => {
-    const { url, type, quality } = req.query;
-    
-    // Curățăm URL-ul și aici
+    const { url } = req.query;
     const cleanUrl = sanitizeUrl(url);
-    console.log(`💰 Convert Request: ${type} - ${quality} -> ${cleanUrl}`);
 
     try {
-        const downloadLink = await fetchFromRapidAPI(cleanUrl, type, quality);
+        // 1. Obținem ID-ul sarcinii
+        const jobId = await startConversion(cleanUrl);
+        if (!jobId) return res.status(500).send("Nu s-a putut iniția conversia (API Error).");
 
+        // 2. Așteptăm să fie gata (Polling)
+        const downloadLink = await pollProgress(jobId);
+
+        // 3. Rezultat
         if (downloadLink) {
             return res.redirect(downloadLink);
         } else {
-            res.status(404).send('RapidAPI nu a putut genera link-ul. Verifică log-urile serverului.');
+            return res.status(500).send("Timeout: Conversia durează prea mult sau a eșuat.");
         }
+
     } catch (error) {
-        res.status(500).send("Eroare interna.");
+        res.status(500).send("Eroare internă.");
     }
 });
 
 app.listen(PORT, '0.0.0.0', () => {
-    console.log(`🚀 Server DEBUG pornit pe portul ${PORT}`);
+    console.log(`🚀 Server API NOU (Queue System) pornit pe portul ${PORT}`);
 });
