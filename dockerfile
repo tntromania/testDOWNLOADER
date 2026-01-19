@@ -1,35 +1,29 @@
-# Folosim Debian 12 (Bookworm) care are Python 3.11 nativ
+# Folosim Debian 12 (Bookworm)
 FROM node:20-bookworm
 
-# 1. Instalăm Python, Pip și FFmpeg
-# 'python3-full' este necesar pe Bookworm pentru venv
+# 1. Instalăm Python și yt-dlp (necesar DOAR pentru titlu și transcript, nu video)
 RUN apt-get update && apt-get install -y \
     python3 \
     python3-pip \
     python3-full \
     ffmpeg \
-    atomicparsley \
     curl \
     && rm -rf /var/lib/apt/lists/*
 
-# 2. Instalăm yt-dlp prin PIP (cea mai nouă versiune)
-# Folosim --break-system-packages pentru că suntem în Docker și nu ne pasă de mediul izolat
+# 2. Instalăm yt-dlp
 RUN python3 -m pip install -U yt-dlp --break-system-packages
-
-# Verificăm unde s-a instalat (de obicei în /usr/local/bin)
-RUN which yt-dlp
 
 WORKDIR /app
 
-# 3. Copiem fișierele de configurare
+# 3. Copiem fișierele de dependințe
 COPY package*.json ./
 RUN npm install --production
 
-# 4. Copiem restul aplicației
+# 4. Copiem codul sursă
 COPY . .
 
-# 5. Setăm portul
+# 5. Expunem portul
 EXPOSE 3000
 
-# 6. Pornim
+# 6. Pornim serverul
 CMD ["node", "server.js"]

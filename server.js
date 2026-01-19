@@ -4,53 +4,56 @@ const { spawn } = require('child_process');
 const path = require('path');
 const fs = require('fs');
 const OpenAI = require('openai');
+const axios = require('axios');
 
 const app = express();
 const PORT = 3000;
 
 app.use(cors());
 app.use(express.json());
-app.use(express.static(path.join(__dirname, 'public'))); 
+app.use(express.static(path.join(__dirname, 'public')));
 app.use(express.static(__dirname));
 
-const YTDLP_PATH = '/usr/local/bin/yt-dlp'; // Verifică calea pe serverul tău
-const COOKIES_PATH = path.join(__dirname, 'cookies.txt');
-
-// ⚡ CACHE ÎN MEMORIE
-const memoryCache = new Map();
+// --- CONFIGURARE ---
+const YTDLP_PATH = '/usr/local/bin/yt-dlp'; // Instalat via Docker
+const RAPIDAPI_KEY = '7efb2ec2c9msh9064cf9c42d6232p172418jsn9da8ae5664d3';
+const RAPIDAPI_HOST = 'youtube-info-download-api.p.rapidapi.com';
 
 const openai = new OpenAI({
-    apiKey: process.env.OPENAI_API_KEY,
+    apiKey: process.env.OPENAI_API_KEY, // Asigură-te că ai asta în env variables în Coolify
 });
 
-// Helper: Verificăm dacă e YouTube
-function isYoutubeUrl(url) {
-    return /(youtube\.com|youtu\.be)/i.test(url);
-}
+// Cache simplu pentru Transcript/Titlu (să nu cerem de 2 ori pentru același link)
+const metadataCache = new Map();
 
-// Argumente "Lightweight"
-// Argumente "Lightweight" & Anti-Ban
-function getFastArgs() {
-    const args = [
-        '--no-warnings', 
-        '--no-check-certificates', 
-        '--referer', 'https://www.youtube.com/',
-        '--compat-options', 'no-youtube-unavailable-videos',
-        '--no-playlist',
-        
-        // 🔥 MODIFICARE: Folosim 'android' în loc de 'ios'. 
-        // Android e mai stabil pentru Shorts și nu dă eroarea "Format not available" așa des.
+// --- FUNCȚII HELPER ---
+
+// 1. Argumente light pentru yt-dlp (Doar text/metadata)
+function getMetadataArgs() {
+    return [
+        '--no-warnings',
+        '--no-check-certificates',
+        '--dump-json', // Vrem doar JSON cu info, nu download
+        '--skip-download',
         '--extractor-args', 'youtube:player_client=android',
     ];
-
-    if (fs.existsSync(COOKIES_PATH)) {
-        args.push('--cookies', COOKIES_PATH);
-    }
-    
-    return args;
 }
 
-// Curățare VTT
+// 2. Argumente pentru Subtitrări
+function getSubtitleArgs(outputBase) {
+    return [
+        '--no-warnings',
+        '--no-check-certificates',
+        '--skip-download',
+        '--write-subs',
+        '--write-auto-subs',
+        '--sub-lang', 'en,ro,.*',
+        '--sub-format', 'vtt',
+        '--output', outputBase,
+    ];
+}
+
+// 3. Curățare Text VTT
 function cleanVttText(vttContent) {
     const lines = vttContent.split('\n');
     const uniqueLines = new Set();
@@ -63,184 +66,169 @@ function cleanVttText(vttContent) {
     return Array.from(uniqueLines).join(' ');
 }
 
-// Extragere Transcript (Doar pentru YouTube)
-async function getTranscriptWithYtDlp(url) {
+// 4. Extragere Transcript Local (pe VPS)
+async function getTranscript(url) {
     return new Promise((resolve) => {
-        const outputBase = `/tmp/transcript_${Date.now()}_${Math.random().toString(36).substring(7)}`;
-        const args = [
-            ...getFastArgs(),
-            '--skip-download', 
-            '--write-subs', 
-            '--write-auto-subs',
-            '--sub-lang', 'en,ro,.*', 
-            '--sub-format', 'vtt',
-            '--output', outputBase,
-            url
-        ];
-
+        const outputBase = `/tmp/sub_${Date.now()}_${Math.random().toString(36).substr(7)}`;
+        const args = [...getSubtitleArgs(outputBase), url];
+        
         const process = spawn(YTDLP_PATH, args);
         
-        process.on('close', () => {
+        process.on('close', (code) => {
             const dir = '/tmp';
             try {
                 if (!fs.existsSync(dir)) fs.mkdirSync(dir);
                 const files = fs.readdirSync(dir);
-                const transcriptFile = files.find(f => f.startsWith(path.basename(outputBase)) && f.endsWith('.vtt'));
+                const subFile = files.find(f => f.startsWith(path.basename(outputBase)) && f.endsWith('.vtt'));
                 
-                if (transcriptFile) {
-                    const fullPath = path.join(dir, transcriptFile);
-                    const content = fs.readFileSync(fullPath, 'utf8');
-                    fs.unlinkSync(fullPath); 
+                if (subFile) {
+                    const content = fs.readFileSync(path.join(dir, subFile), 'utf8');
+                    fs.unlinkSync(path.join(dir, subFile)); // Curățăm
                     resolve(cleanVttText(content));
                 } else {
                     resolve(null);
                 }
-            } catch (err) { resolve(null); }
+            } catch (e) { resolve(null); }
         });
     });
 }
 
-// Metadata RAPID
-async function getYtMetadata(url) {
-    return new Promise(resolve => {
-        const args = [
-            ...getFastArgs(),
-            '--print', '%(title)s|%(duration_string)s', 
-            url
-        ];
-        
-        const p = spawn(YTDLP_PATH, args);
+// 5. Extragere Titlu (Metadata) Local
+async function getLocalMetadata(url) {
+    return new Promise((resolve, reject) => {
+        const p = spawn(YTDLP_PATH, [...getMetadataArgs(), url]);
         let data = '';
         p.stdout.on('data', d => data += d);
-        
         p.on('close', () => {
-            const parts = data.trim().split('|');
-            if (parts.length >= 2) {
-                resolve({ title: parts[0], duration: parts[1] });
-            } else {
-                resolve({ title: "Video Download", duration: "--:--" });
+            try {
+                const json = JSON.parse(data);
+                resolve({ title: json.title, duration: json.duration_string });
+            } catch (e) {
+                // Dacă eșuează local, returnăm un generic
+                resolve({ title: "Video YouTube (Titlu indisponibil)", duration: "--:--" });
             }
         });
     });
 }
 
-// Procesare GPT
+// 6. Procesare GPT
 async function processWithGPT(text) {
-    if (!process.env.OPENAI_API_KEY) return "Traducere indisponibilă (No API Key).";
-    if (!text || text.length < 5) return "Text prea scurt pentru rezumat/traducere.";
-
+    if (!process.env.OPENAI_API_KEY) return "No API Key.";
+    if (!text || text.length < 50) return "Text prea scurt.";
     try {
         const completion = await openai.chat.completions.create({
             model: "gpt-4o-mini",
             messages: [
-                { role: "system", content: "Traducere directă în română. Fără explicații." },
+                { role: "system", content: "Fă un rezumat scurt, clar, cu liniuțe, în limba română." },
                 { role: "user", content: text }
             ],
-            max_tokens: 1000,
+            max_tokens: 800,
         });
         return completion.choices[0].message.content;
-    } catch (e) {
-        return "Eroare traducere GPT.";
-    }
+    } catch (e) { return "Eroare GPT."; }
 }
 
-// 🚀 ENDPOINT PRINCIPAL (MODIFICAT PENTRU NON-YOUTUBE INSTANT)
-app.get('/api/download', async (req, res) => {
-    const videoUrl = req.query.url;
-    if (!videoUrl) return res.status(400).json({ error: 'URL lipsă' });
+// --- ENDPOINTS ---
 
-    // 1. VERIFICĂ CACHE-UL
-    if (memoryCache.has(videoUrl)) {
-        console.log('⚡ Serving from CACHE (Instant)!');
-        return res.json(memoryCache.get(videoUrl));
-    }
+// A. Endpoint Inițial: Returnează Titlu, Rezumat și LISTA DE BUTOANE
+// NU cheltuie bani pe RapidAPI încă.
+app.get('/api/info', async (req, res) => {
+    const url = req.query.url;
+    if (!url) return res.status(400).json({ error: 'URL lipsă' });
 
-    console.log('\n🎬 Processing:', videoUrl);
-    const startTime = Date.now();
-    const isYt = isYoutubeUrl(videoUrl); // Verificăm sursa
+    console.log(`🔍 Info request: ${url}`);
+
+    // Verificăm cache
+    if (metadataCache.has(url)) return res.json(metadataCache.get(url));
 
     try {
-        let metadataPromise = getYtMetadata(videoUrl);
-        let transcriptPromise;
-
-        // 🔥 LOGICA NOUĂ: Doar YouTube primește transcript
-        if (isYt) {
-            console.log('🔹 YouTube detectat: Se extrage transcript...');
-            transcriptPromise = getTranscriptWithYtDlp(videoUrl);
-        } else {
-            console.log('🔹 Altă platformă: Mod INSTANT (Fără transcript)...');
-            transcriptPromise = Promise.resolve(null); // Returnăm imediat null
-        }
-
-        // 2. PARALELIZARE (Chiar și dacă transcript e null, Promise.all e eficient)
-        const [metadata, rawTranscript] = await Promise.all([
-            metadataPromise,
-            transcriptPromise
+        // 1. Luăm metadata local și transcriptul în paralel
+        const [meta, rawTranscript] = await Promise.all([
+            getLocalMetadata(url),
+            getTranscript(url)
         ]);
-        
-        let transcriptObject = null;
 
-        // Procesăm transcriptul DOAR dacă există (adică doar pt YouTube)
+        // 2. Procesăm GPT dacă avem text
+        let transcriptData = null;
         if (rawTranscript) {
-            const translatedText = await processWithGPT(rawTranscript);
-            transcriptObject = {
-                original: rawTranscript,
-                translated: translatedText
-            };
+            const summary = await processWithGPT(rawTranscript);
+            transcriptData = { original: rawTranscript, translated: summary };
         }
 
-        const qualities = ['360', '480', '720', '1080'];
-        const formats = qualities.map(q => ({
-            quality: q + 'p', format: 'mp4',
-            url: `/api/stream?url=${encodeURIComponent(videoUrl)}&type=video`
-        }));
-        formats.push({ quality: '192', format: 'mp3', url: `/api/stream?url=${encodeURIComponent(videoUrl)}&type=audio` });
+        // 3. Construim lista de formate DISPONIBILE (Hardcoded pentru că API-ul le suportă pe toate)
+        // Link-urile de aici vor duce către endpoint-ul nostru /api/convert care face plata la RapidAPI
+        const formats = [
+            { quality: 'Audio MP3', format: 'mp3', type: 'audio', url: `/api/convert?url=${encodeURIComponent(url)}&type=audio&quality=128` },
+            { quality: 'Video 360p', format: 'mp4', type: 'video', url: `/api/convert?url=${encodeURIComponent(url)}&type=video&quality=360p` },
+            { quality: 'Video 720p', format: 'mp4', type: 'video', url: `/api/convert?url=${encodeURIComponent(url)}&type=video&quality=720p` },
+            { quality: 'Video 1080p', format: 'mp4', type: 'video', url: `/api/convert?url=${encodeURIComponent(url)}&type=video&quality=1080p` }
+        ];
 
-        const responseData = {
-            status: 'ok',
-            data: {
-                title: metadata.title,
-                duration: metadata.duration,
-                formats: formats,
-                transcript: transcriptObject // Va fi null pentru non-YouTube
-            }
+        const response = {
+            title: meta.title,
+            duration: meta.duration,
+            transcript: transcriptData,
+            formats: formats
         };
 
-        // 3. SALVĂM ÎN CACHE
-        memoryCache.set(videoUrl, responseData);
-        
-        console.log(`✅ Gata în ${(Date.now() - startTime) / 1000}s`);
-        res.json(responseData);
+        metadataCache.set(url, response); // Salvăm în cache
+        res.json(response);
 
-    } catch (error) {
-        console.error('❌ Eroare:', error);
-        res.status(500).json({ error: 'Eroare server.' });
+    } catch (e) {
+        console.error(e);
+        res.status(500).json({ error: 'Eroare server' });
     }
 });
 
-// 🚀 ENDPOINT STREAMING
-app.get('/api/stream', (req, res) => {
-    const videoUrl = req.query.url;
-    const isAudio = req.query.type === 'audio';
+// B. Endpoint Convert: Aici se face plata către RapidAPI
+// Se apelează doar când utilizatorul dă click pe un buton
+app.get('/api/convert', async (req, res) => {
+    const { url, type, quality } = req.query; // type: video/audio, quality: 1080p/128
     
-    const filename = isAudio ? 'audio.mp3' : 'video.mp4';
-    res.setHeader('Content-Disposition', `attachment; filename="${filename}"`);
-    res.setHeader('Content-Type', isAudio ? 'audio/mpeg' : 'video/mp4');
-    
-    const args = [
-        ...getFastArgs(),
-        '-o', '-',
-        '-f', isAudio ? 'bestaudio' : 'best',
-        '--buffer-size', '16K', 
-        '--no-part', 
-        videoUrl
-    ];
+    console.log(`💰 RapidAPI Call: ${type} - ${quality} for ${url}`);
 
-    const streamProcess = spawn(YTDLP_PATH, args);
-    streamProcess.stdout.pipe(res);
-    req.on('close', () => streamProcess.kill());
+    try {
+        // Configurăm parametrii pentru RapidAPI
+        const params = {
+            url: url,
+            format: type === 'audio' ? 'mp3' : 'mp4', 
+        };
+
+        if (type === 'audio') {
+            params.audio_quality = '128'; // Standard MP3
+        } else {
+            // RapidAPI așteaptă quality de genul '1080p', '720p' etc.
+            params.video_quality = quality || '720p'; 
+        }
+
+        // Apelul propriu-zis
+        const apiResponse = await axios.get(`https://${RAPIDAPI_HOST}/ajax/download.php`, {
+            params: params,
+            headers: {
+                'x-rapidapi-host': RAPIDAPI_HOST,
+                'x-rapidapi-key': RAPIDAPI_KEY
+            }
+        });
+
+        const data = apiResponse.data;
+
+        // Verificăm dacă RapidAPI ne-a dat link-ul
+        if (data && (data.url || data.link)) {
+            const downloadLink = data.url || data.link;
+            
+            // REDIRECȚIONĂM utilizatorul direct către link-ul generat de API
+            // Astfel download-ul pornește instant în browser
+            return res.redirect(downloadLink);
+        } else {
+            throw new Error('API nu a returnat un link valid.');
+        }
+
+    } catch (error) {
+        console.error('❌ RapidAPI Error:', error.response ? error.response.data : error.message);
+        res.status(500).send("Eroare la generarea link-ului de download (RapidAPI).");
+    }
 });
 
 app.listen(PORT, '0.0.0.0', () => {
-    console.log(`🚀 Server TURBO pornit pe portul ${PORT}`);
+    console.log(`🚀 Server RapidAPI pornit pe portul ${PORT}`);
 });
