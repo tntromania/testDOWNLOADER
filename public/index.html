@@ -3,21 +3,21 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>YouTube Turbo</title>
+    <title>YT Downloader Fix</title>
     <link rel="stylesheet" href="style.css">
 </head>
 <body>
 
 <div class="container">
     <div class="card">
-        <h1>YouTube Turbo 🚀</h1>
+        <h1>YouTube & Shorts 🚀</h1>
 
         <div class="input-area">
-            <input type="text" id="url" placeholder="Lipește link-ul YouTube aici (Video sau Shorts)..." autocomplete="off">
+            <input type="text" id="url" placeholder="Lipește link-ul aici (Ex: youtube.com/shorts/...)" autocomplete="off">
         </div>
 
         <div class="loader" id="loader">
-            ⏳ Se analizează, descarcă și traduce...
+            ⏳ Analizez... (Durează 2-3 secunde)
         </div>
 
         <div class="results" id="results">
@@ -30,11 +30,11 @@
 
             <div class="text-grid">
                 <div class="text-box">
-                    <h3>🇷🇴 REZUMAT AI (ROMÂNĂ)</h3>
+                    <h3>🇷🇴 REZUMAT AI</h3>
                     <div class="content" id="translatedText"></div>
                 </div>
                 <div class="text-box">
-                    <h3>🇺🇸 TRANSCRIPT ORIGINAL</h3>
+                    <h3>🇺🇸 TRANSCRIPT</h3>
                     <div class="content" id="originalText"></div>
                 </div>
             </div>
@@ -47,24 +47,21 @@
     const loader = document.getElementById('loader');
     const results = document.getElementById('results');
     let debounceTimer;
-    let lastUrl = '';
 
     urlInput.addEventListener('input', () => {
         clearTimeout(debounceTimer);
         const val = urlInput.value.trim();
-
-        if (val.length > 10 && (val.includes('youtube.com') || val.includes('youtu.be')) && val !== lastUrl) {
+        if (val.length > 5) {
             debounceTimer = setTimeout(() => {
                 startProcess(val);
-            }, 500); // Porneste la 0.5s dupa ce te opresti din scris
+            }, 800);
         }
     });
 
     async function startProcess(url) {
-        lastUrl = url;
         loader.style.display = 'block';
         results.style.display = 'none';
-        document.getElementById('btnGrid').innerHTML = ''; // Curata butoanele vechi
+        document.getElementById('btnGrid').innerHTML = '';
 
         try {
             const res = await fetch(`/api/process?url=${encodeURIComponent(url)}`);
@@ -75,23 +72,23 @@
             // 1. Titlu
             document.getElementById('vidTitle').innerText = data.title;
 
-            // 2. Butoane Download
+            // 2. Butoane
             if (data.downloads && data.downloads.length > 0) {
                 data.downloads.forEach(d => {
                     const a = document.createElement('a');
                     a.href = d.url;
                     a.className = `dl-btn ${d.type}`;
                     a.target = '_blank';
-                    a.innerHTML = d.type === 'video' ? `VIDEO ${d.quality}` : 'AUDIO MP3';
+                    a.innerHTML = `DESCARCĂ ${d.label}`;
                     document.getElementById('btnGrid').appendChild(a);
                 });
             } else {
-                document.getElementById('btnGrid').innerHTML = '<span style="color:red">Download indisponibil</span>';
+                document.getElementById('btnGrid').innerHTML = '<p style="color:orange">API-ul nu a găsit link-uri directe de download pentru acest video.</p>';
             }
 
-            // 3. Transcripturi
-            document.getElementById('translatedText').textContent = data.transcript.translated || "Fără traducere.";
-            document.getElementById('originalText').textContent = data.transcript.original || "Fără transcript.";
+            // 3. Texte
+            document.getElementById('translatedText').textContent = data.transcript.translated;
+            document.getElementById('originalText').textContent = data.transcript.original;
 
             results.style.display = 'block';
 
@@ -102,6 +99,5 @@
         }
     }
 </script>
-
 </body>
 </html>
