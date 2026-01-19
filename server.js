@@ -13,123 +13,141 @@ app.use(express.static(path.join(__dirname, 'public')));
 
 // --- CONFIGURARE ---
 const RAPIDAPI_KEY = process.env.RAPIDAPI_KEY || '7efb2ec2c9msh9064cf9c42d6232p172418jsn9da8ae5664d3';
-const RAPIDAPI_HOST = 'youtube-captions-transcript-subtitles-video-combiner.p.rapidapi.com';
+// API-ul NOU cerut de tine
+const RAPIDAPI_HOST = 'youtube-video-and-shorts-downloader.p.rapidapi.com';
 const OPENAI_API_KEY = process.env.OPENAI_API_KEY;
 
 const openai = new OpenAI({ apiKey: OPENAI_API_KEY });
 
-// --- RUTA PRINCIPALĂ ---
+// --- HELPERE ---
+
+// Extrage ID-ul corect (suportă Shorts, Watch, Mobile)
+function extractVideoId(url) {
+    const regex = /(?:youtube\.com\/(?:[^\/]+\/.+\/|(?:v|e(?:mbed)?)\/|.*[?&]v=)|youtu\.be\/)([^"&?\/\s]{11})/;
+    const match = url.match(regex);
+    return match ? match[1] : null;
+}
+
+// Curăță textul din subtitrări (scoate timestamp-uri dacă e cazul)
+function cleanText(text) {
+    // Dacă e XML/HTML simplu, scoatem tag-urile
+    return text.replace(/<[^>]*>/g, ' ').replace(/\s+/g, ' ').trim();
+}
+
+// --- RUTA PRINCIPALĂ DE PROCESARE ---
 app.get('/api/process', async (req, res) => {
     const { url } = req.query;
     if (!url) return res.status(400).json({ error: 'Lipsește URL-ul.' });
 
-    // Extragem ID-ul video-ului
-    const videoIdMatch = url.match(/(?:youtube\.com\/(?:[^\/]+\/.+\/|(?:v|e(?:mbed)?)\/|.*[?&]v=)|youtu\.be\/)([^"&?\/\s]{11})/);
-    const videoId = videoIdMatch ? videoIdMatch[1] : null;
-
+    const videoId = extractVideoId(url);
     if (!videoId) return res.status(400).json({ error: 'Link invalid.' });
 
-    console.log(`🚀 Procesez ID: ${videoId}`);
+    console.log(`🚀 Start analiză ID: ${videoId}`);
 
     try {
-        // PASUL 1: Obținem Detalii Video (Titlu, Durată, Thumb)
-        const infoOptions = {
-            method: 'GET',
-            url: `https://${RAPIDAPI_HOST}/get-video-info/${videoId}`,
-            headers: {
-                'x-rapidapi-key': RAPIDAPI_KEY,
-                'x-rapidapi-host': RAPIDAPI_HOST
-            }
-        };
+        // --- PASUL 1: CERERI PARALELE CĂTRE RAPIDAPI (Viteză Maximă) ---
+        // Cerem Info, Download Links și Subtitrări în același timp
         
-        const infoRes = await axios.request(infoOptions);
-        const infoData = infoRes.data;
+        const headers = {
+            'X-RapidAPI-Key': RAPIDAPI_KEY,
+            'X-RapidAPI-Host': RAPIDAPI_HOST
+        };
 
-        // PASUL 2: Obținem Lista de Limbi (Ca să știm ce cerem)
-        const langOptions = {
-            method: 'GET',
-            url: `https://${RAPIDAPI_HOST}/language-list/${videoId}`,
-            headers: {
-                'x-rapidapi-key': RAPIDAPI_KEY,
-                'x-rapidapi-host': RAPIDAPI_HOST
-            }
-        };
-        
-        let targetLang = 'en'; // Default
-        try {
-            const langRes = await axios.request(langOptions);
-            // Căutăm engleza sau prima disponibilă
-            if (langRes.data && Array.isArray(langRes.data)) {
-                const hasEn = langRes.data.find(l => l.languageCode === 'en');
-                if (!hasEn && langRes.data.length > 0) {
-                    targetLang = langRes.data[0].languageCode;
+        const [infoRes, downloadRes, subRes] = await Promise.allSettled([
+            axios.get(`https://${RAPIDAPI_HOST}/video.php`, { params: { id: videoId }, headers }),
+            axios.get(`https://${RAPIDAPI_HOST}/download.php`, { params: { id: videoId }, headers }),
+            axios.get(`https://${RAPIDAPI_HOST}/subtitle.php`, { params: { id: videoId }, headers })
+        ]);
+
+        // --- PASUL 2: PROCESARE VIDEO INFO & DOWNLOAD LINKS ---
+        let title = "Video YouTube";
+        let downloadLinks = [];
+
+        // Procesare Info
+        if (infoRes.status === 'fulfilled' && infoRes.value.data) {
+            title = infoRes.value.data.title || title;
+        }
+
+        // Procesare Link-uri Download
+        if (downloadRes.status === 'fulfilled' && Array.isArray(downloadRes.value.data)) {
+            // API-ul returnează un array de formate. Le sortăm să luăm cea mai bună calitate cu sunet.
+            // Căutăm formate care au 'video' și 'audio' (sau presupunem că mp4 are ambele)
+            const formats = downloadRes.value.data;
+            
+            // Extragem Video (MP4) - Căutăm 1080p, 720p
+            const videoFormat = formats.find(f => f.quality === '1080p' && f.extension === 'mp4') ||
+                                formats.find(f => f.quality === '720p' && f.extension === 'mp4') ||
+                                formats.find(f => f.extension === 'mp4'); // Fallback
+
+            // Extragem Audio (MP3/M4A)
+            const audioFormat = formats.find(f => f.extension === 'mp3' || f.extension === 'm4a');
+
+            if (videoFormat) downloadLinks.push({ type: 'video', url: videoFormat.url, quality: videoFormat.quality });
+            if (audioFormat) downloadLinks.push({ type: 'audio', url: audioFormat.url, quality: 'Audio' });
+        }
+
+        // --- PASUL 3: PROCESARE TRANSCRIPT & TRADUCERE ---
+        let originalText = "Nu există subtitrări disponibile.";
+        let translatedText = "";
+
+        if (subRes.status === 'fulfilled' && Array.isArray(subRes.value.data)) {
+            // Căutăm limba engleză ('en')
+            const subs = subRes.value.data;
+            const enSub = subs.find(s => s.lang === 'en') || subs[0]; // Fallback la prima limbă
+
+            if (enSub && enSub.url) {
+                try {
+                    // Descărcăm conținutul text al subtitrării
+                    console.log("📥 Descarc subtitrarea de la:", enSub.url);
+                    const textResponse = await axios.get(enSub.url);
+                    // Curățăm textul (uneori e JSON, alteori XML/VTT)
+                    const rawData = textResponse.data;
+                    
+                    if (typeof rawData === 'object') {
+                        // Dacă e JSON (bazat pe doc-ul tău)
+                        // Uneori e array de obiecte {start, dur, text}
+                        /* Verificăm structura JSON din doc */
+                        originalText = JSON.stringify(rawData); // Temporar, să vedem structura
+                        if (Array.isArray(rawData)) {
+                             originalText = rawData.map(item => item.text).join(' ');
+                        }
+                    } else {
+                        // E string (VTT/XML)
+                        originalText = cleanText(rawData);
+                    }
+
+                    // TRADUCERE GPT
+                    if (OPENAI_API_KEY && originalText.length > 10) {
+                        const gpt = await openai.chat.completions.create({
+                            model: "gpt-4o-mini",
+                            messages: [
+                                { role: "system", content: "Fă un rezumat clar în limba română al acestui text." },
+                                { role: "user", content: originalText.substring(0, 15000) } // Limităm lungimea
+                            ]
+                        });
+                        translatedText = gpt.choices[0].message.content;
+                    }
+
+                } catch (err) {
+                    console.error("Eroare la fetch text subtitrare:", err.message);
                 }
             }
-        } catch (e) {
-            console.log("⚠️ Nu am putut lua lista de limbi, încerc 'en' default.");
         }
 
-        // PASUL 3: Descărcăm Transcriptul (JSON)
-        // Folosim endpoint-ul /download-json/{videoId} cu parametrul language
-        const subOptions = {
-            method: 'GET',
-            url: `https://${RAPIDAPI_HOST}/download-json/${videoId}`,
-            params: { language: targetLang },
-            headers: {
-                'x-rapidapi-key': RAPIDAPI_KEY,
-                'x-rapidapi-host': RAPIDAPI_HOST
-            }
-        };
-
-        let originalText = "Transcript indisponibil.";
-        let translatedText = "Nu am putut traduce.";
-
-        try {
-            const subRes = await axios.request(subOptions);
-            const subData = subRes.data;
-
-            // API-ul returnează un Array de obiecte: [{start, dur, text}, ...]
-            // Noi vrem doar textul lipit pentru traducere.
-            if (Array.isArray(subData)) {
-                originalText = subData.map(item => item.text).join(' ');
-            }
-
-            // PASUL 4: Traducere cu GPT
-            if (OPENAI_API_KEY && originalText.length > 5) {
-                const gpt = await openai.chat.completions.create({
-                    model: "gpt-4o-mini",
-                    messages: [
-                        { role: "system", content: "Ești un traducător expert. Tradu următorul transcript în limba română. Păstrează sensul și fii concis." },
-                        { role: "user", content: originalText }
-                    ]
-                });
-                translatedText = gpt.choices[0].message.content;
-            }
-
-        } catch (subError) {
-            console.error("Eroare la transcript:", subError.message);
-            if(subError.response && subError.response.status === 404) {
-                originalText = "Acest video nu are subtitrări disponibile.";
-            }
-        }
-
-        // RĂSPUNS FINAL
+        // --- RĂSPUNS FINAL ---
         res.json({
             success: true,
-            info: {
-                title: infoData.title || "Video Fără Titlu",
-                thumb: infoData.thumbnail ? infoData.thumbnail[infoData.thumbnail.length-1].url : "",
-                duration: infoData.lengthSeconds ? `${Math.floor(infoData.lengthSeconds / 60)}:${infoData.lengthSeconds % 60}` : "N/A"
-            },
+            title: title,
+            downloads: downloadLinks,
             transcript: {
-                original: originalText,
+                original: originalText.substring(0, 5000) + (originalText.length>5000?"...":""), // Nu trimitem romanul întreg
                 translated: translatedText
             }
         });
 
     } catch (error) {
-        console.error("❌ Eroare Generală:", error.message);
-        res.status(500).json({ error: "Eroare la procesare API." });
+        console.error("❌ Eroare generală:", error.message);
+        res.status(500).json({ error: "Eroare la procesare." });
     }
 });
 
@@ -138,5 +156,5 @@ app.get('*', (req, res) => {
 });
 
 app.listen(PORT, '0.0.0.0', () => {
-    console.log(`Server Captions pornit pe portul ${PORT}`);
+    console.log(`🚀 YouTube Turbo Server pornit pe portul ${PORT}`);
 });

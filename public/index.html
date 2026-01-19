@@ -3,131 +3,103 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>YT Pro Transcript & Translate</title>
-    <style>
-        body { background: #0f0f0f; color: #fff; font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; display: flex; flex-direction: column; align-items: center; padding: 20px; margin: 0; }
-        .container { width: 100%; max-width: 900px; }
-
-        .search-box { display: flex; gap: 10px; margin-bottom: 30px; }
-        input { flex: 1; padding: 15px; border-radius: 8px; border: 1px solid #333; background: #222; color: white; font-size: 16px; outline: none; }
-        input:focus { border-color: #e62117; }
-        button { padding: 15px 30px; background: #e62117; color: white; border: none; border-radius: 8px; cursor: pointer; font-size: 16px; font-weight: bold; transition: 0.2s; }
-        button:hover { background: #ff0000; }
-
-        .loader { display: none; text-align: center; margin: 20px; color: #aaa; font-size: 18px; }
-
-        .result-area { display: none; animation: fadeIn 0.5s; }
-
-        .video-header { display: flex; gap: 20px; background: #1f1f1f; padding: 20px; border-radius: 12px; margin-bottom: 20px; align-items: center; }
-        .video-thumb { width: 160px; height: 90px; object-fit: cover; border-radius: 8px; }
-        .video-info h2 { margin: 0 0 10px 0; font-size: 18px; }
-        .video-info p { margin: 0; color: #aaa; }
-
-        .content-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 20px; }
-        .text-panel { background: #1f1f1f; border-radius: 12px; padding: 20px; height: 500px; display: flex; flex-direction: column; }
-        .panel-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 15px; border-bottom: 1px solid #333; padding-bottom: 10px; }
-        .panel-header h3 { margin: 0; font-size: 16px; color: #ddd; }
-
-        .text-content { flex: 1; overflow-y: auto; white-space: pre-wrap; line-height: 1.6; font-size: 14px; color: #ccc; padding-right: 10px; }
-
-        .copy-btn { background: #333; border: none; color: #fff; padding: 5px 10px; border-radius: 4px; cursor: pointer; font-size: 12px; }
-        .copy-btn:hover { background: #444; }
-
-        /* Scrollbar custom */
-        ::-webkit-scrollbar { width: 8px; }
-        ::-webkit-scrollbar-track { background: #1f1f1f; }
-        ::-webkit-scrollbar-thumb { background: #444; border-radius: 4px; }
-        ::-webkit-scrollbar-thumb:hover { background: #555; }
-
-        @media (max-width: 768px) {
-            .content-grid { grid-template-columns: 1fr; }
-            .video-header { flex-direction: column; text-align: center; }
-        }
-        @keyframes fadeIn { from { opacity: 0; transform: translateY(10px); } to { opacity: 1; transform: translateY(0); } }
-    </style>
+    <title>YouTube Turbo</title>
+    <link rel="stylesheet" href="style.css">
 </head>
 <body>
 
 <div class="container">
-    <h1 style="text-align: center; color: #e62117; margin-bottom: 30px;">YouTube Pro: Transcript & Translate</h1>
+    <div class="card">
+        <h1>YouTube Turbo 🚀</h1>
 
-    <div class="search-box">
-        <input type="text" id="url" placeholder="Lipește link-ul YouTube aici (Video sau Shorts)...">
-        <button onclick="process()">ANALIZEAZĂ</button>
-    </div>
-
-    <div class="loader" id="loader">
-        ⏳ Se extrag datele, transcriptul și se face traducerea AI... <br>
-        <small>(Poate dura 5-10 secunde)</small>
-    </div>
-
-    <div class="result-area" id="result">
-        <div class="video-header">
-            <img id="vidThumb" src="" class="video-thumb">
-            <div class="video-info">
-                <h2 id="vidTitle">Titlu Video</h2>
-                <p>Durată: <span id="vidDur"></span></p>
-                <a id="extLink" href="#" target="_blank" style="color: #3ea6ff; text-decoration: none; margin-top: 10px; display: inline-block;">Deschide pe YouTube</a>
-            </div>
+        <div class="input-area">
+            <input type="text" id="url" placeholder="Lipește link-ul YouTube aici (Video sau Shorts)..." autocomplete="off">
         </div>
 
-        <div class="content-grid">
-            <div class="text-panel">
-                <div class="panel-header">
-                    <h3>🇺🇸 Transcript Original</h3>
-                    <button class="copy-btn" onclick="copyText('origText')">COPY</button>
-                </div>
-                <div class="text-content" id="origText"></div>
+        <div class="loader" id="loader">
+            ⏳ Se analizează, descarcă și traduce...
+        </div>
+
+        <div class="results" id="results">
+            <div class="video-header">
+                <h2 id="vidTitle"></h2>
             </div>
 
-            <div class="text-panel">
-                <div class="panel-header">
-                    <h3>🇷🇴 Traducere AI (RO)</h3>
-                    <button class="copy-btn" onclick="copyText('transText')">COPY</button>
+            <div class="btn-grid" id="btnGrid">
+            </div>
+
+            <div class="text-grid">
+                <div class="text-box">
+                    <h3>🇷🇴 REZUMAT AI (ROMÂNĂ)</h3>
+                    <div class="content" id="translatedText"></div>
                 </div>
-                <div class="text-content" id="transText"></div>
+                <div class="text-box">
+                    <h3>🇺🇸 TRANSCRIPT ORIGINAL</h3>
+                    <div class="content" id="originalText"></div>
+                </div>
             </div>
         </div>
     </div>
 </div>
 
 <script>
-    async function process() {
-        const url = document.getElementById('url').value;
-        if(!url) return alert("Ai uitat link-ul, șefu!");
+    const urlInput = document.getElementById('url');
+    const loader = document.getElementById('loader');
+    const results = document.getElementById('results');
+    let debounceTimer;
+    let lastUrl = '';
 
-        // UI Reset
-        document.getElementById('loader').style.display = 'block';
-        document.getElementById('result').style.display = 'none';
+    urlInput.addEventListener('input', () => {
+        clearTimeout(debounceTimer);
+        const val = urlInput.value.trim();
+
+        if (val.length > 10 && (val.includes('youtube.com') || val.includes('youtu.be')) && val !== lastUrl) {
+            debounceTimer = setTimeout(() => {
+                startProcess(val);
+            }, 500); // Porneste la 0.5s dupa ce te opresti din scris
+        }
+    });
+
+    async function startProcess(url) {
+        lastUrl = url;
+        loader.style.display = 'block';
+        results.style.display = 'none';
+        document.getElementById('btnGrid').innerHTML = ''; // Curata butoanele vechi
 
         try {
             const res = await fetch(`/api/process?url=${encodeURIComponent(url)}`);
             const data = await res.json();
 
-            if(data.error) throw new Error(data.error);
+            if (data.error) throw new Error(data.error);
 
-            // Populare Date
-            document.getElementById('vidTitle').innerText = data.info.title;
-            document.getElementById('vidThumb').src = data.info.thumb;
-            document.getElementById('vidDur').innerText = data.info.duration;
-            document.getElementById('extLink').href = url;
+            // 1. Titlu
+            document.getElementById('vidTitle').innerText = data.title;
 
-            document.getElementById('origText').textContent = data.transcript.original;
-            document.getElementById('transText').textContent = data.transcript.translated;
+            // 2. Butoane Download
+            if (data.downloads && data.downloads.length > 0) {
+                data.downloads.forEach(d => {
+                    const a = document.createElement('a');
+                    a.href = d.url;
+                    a.className = `dl-btn ${d.type}`;
+                    a.target = '_blank';
+                    a.innerHTML = d.type === 'video' ? `VIDEO ${d.quality}` : 'AUDIO MP3';
+                    document.getElementById('btnGrid').appendChild(a);
+                });
+            } else {
+                document.getElementById('btnGrid').innerHTML = '<span style="color:red">Download indisponibil</span>';
+            }
 
-            // Afișare
-            document.getElementById('result').style.display = 'block';
+            // 3. Transcripturi
+            document.getElementById('translatedText').textContent = data.transcript.translated || "Fără traducere.";
+            document.getElementById('originalText').textContent = data.transcript.original || "Fără transcript.";
+
+            results.style.display = 'block';
 
         } catch (e) {
             alert("Eroare: " + e.message);
         } finally {
-            document.getElementById('loader').style.display = 'none';
+            loader.style.display = 'none';
         }
-    }
-
-    function copyText(id) {
-        const t = document.getElementById(id).textContent;
-        navigator.clipboard.writeText(t).then(() => alert("Copiat!"));
     }
 </script>
 
