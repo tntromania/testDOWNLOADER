@@ -15,7 +15,7 @@ app.use(express.static(path.join(__dirname, 'public')));
 app.use(express.static(__dirname));
 
 // --- CONFIGURARE ---
-const YTDLP_PATH = '/usr/local/bin/yt-dlp'; 
+const YTDLP_PATH = '/usr/local/bin/yt-dlp';
 const RAPIDAPI_KEY = '7efb2ec2c9msh9064cf9c42d6232p172418jsn9da8ae5664d3';
 const RAPIDAPI_HOST = 'youtube-mp41.p.rapidapi.com';
 
@@ -25,7 +25,7 @@ const openai = new OpenAI({
 
 const metadataCache = new Map();
 
-// --- HELPER: Curățare URL ---
+// --- HELPERE ---
 function sanitizeUrl(url) {
     if (!url) return "";
     if (url.includes('/shorts/')) {
@@ -48,7 +48,7 @@ function cleanVttText(vttContent) {
     return Array.from(uniqueLines).join(' ');
 }
 
-// 1. Extragere Titlu via HTML (Backup)
+// 1. HTML Title Scraper (Fallback)
 async function getTitleFromHTML(url) {
     try {
         const response = await axios.get(url, { headers: { 'User-Agent': 'Mozilla/5.0' } });
@@ -78,7 +78,7 @@ async function getLocalMetadata(url) {
     });
 }
 
-// 3. Transcript
+// 3. Transcript Local
 async function getTranscript(url) {
     return new Promise((resolve) => {
         const outputBase = `/tmp/sub_${Date.now()}_${Math.random().toString(36).substr(7)}`;
@@ -135,45 +135,48 @@ app.get('/api/info', async (req, res) => {
     } catch (e) { res.status(500).json({ error: 'Eroare server' }); }
 });
 
-// --- LOGICA NOUĂ: QUEUE & POLL ---
+// --- LOGICA NOUĂ: API DISCOVERY ---
 
 async function startConversion(url, format) {
-    try {
-        console.log(`🚀 [API Nou] Start conversie: ${url} (format: ${format})`);
-        
-        // 🔥 MODIFICAREA PRINCIPALĂ AICI: folosim /api/v1/add
-        const endpoint = `https://${RAPIDAPI_HOST}/api/v1/add`;
-        
-        const response = await axios.get(endpoint, {
-            params: { 
-                url: url,
-                format: format || 'mp4' // specificăm formatul mp3 sau mp4
-            },
-            headers: { 'x-rapidapi-host': RAPIDAPI_HOST, 'x-rapidapi-key': RAPIDAPI_KEY }
-        });
-        
-        // Unii returnează 'id', alții 'hash'. Verificăm ambele.
-        const id = response.data.id || response.data.hash;
+    // LISTA DE ENDPOINT-URI POSIBILE (Le încercăm pe rând)
+    const possibleEndpoints = [
+        `/api/v1/init`,
+        `/api/v1/convert`,
+        `/api/v1/dloadUrl`,
+        `/api/v1/create`
+    ];
 
-        if (id) {
-            console.log(`✅ Job ID primit: ${id}`);
-            return id;
+    for (const path of possibleEndpoints) {
+        try {
+            console.log(`📡 Încerc endpoint: ${path}`);
+            const response = await axios.get(`https://${RAPIDAPI_HOST}${path}`, {
+                params: { url: url, format: format || 'mp4' },
+                headers: { 'x-rapidapi-host': RAPIDAPI_HOST, 'x-rapidapi-key': RAPIDAPI_KEY }
+            });
+
+            const data = response.data;
+            const id = data.id || data.hash || (data.status === 'processing' ? data.job_id : null);
+
+            if (id) {
+                console.log(`✅ BINGO! Endpoint corect: ${path} | ID: ${id}`);
+                return id;
+            }
+        } catch (error) {
+            // Ignorăm erorile 404 și trecem la următorul endpoint
+            if (error.response && error.response.status !== 404) {
+                console.log(`⚠️ Eroare pe ${path}: ${error.message}`);
+            }
         }
-        throw new Error("Răspuns ciudat la Start: " + JSON.stringify(response.data));
-    } catch (error) {
-        console.error("❌ Eroare Start Job:", error.response ? error.response.data : error.message);
-        return null;
     }
+    return null;
 }
 
 async function pollProgress(id) {
     let attempts = 0;
-    const maxAttempts = 60; // 2 minute timeout
+    const maxAttempts = 60; 
 
     while (attempts < maxAttempts) {
         try {
-            console.log(`⏳ Checking ID: ${id} (${attempts}/${maxAttempts})`);
-            
             const response = await axios.get(`https://${RAPIDAPI_HOST}/api/v1/progress`, {
                 params: { id: id },
                 headers: { 'x-rapidapi-host': RAPIDAPI_HOST, 'x-rapidapi-key': RAPIDAPI_KEY }
@@ -185,16 +188,12 @@ async function pollProgress(id) {
                 console.log(`✅ GATA! URL: ${data.url}`);
                 return data.url;
             }
-            
-            if (data.status === 'fail' || data.error) {
-                console.error("❌ Eșec API:", data);
+            if (data.status === 'fail') {
                 return null;
             }
-
             await new Promise(r => setTimeout(r, 2000));
             attempts++;
         } catch (error) {
-            console.error("⚠️ Eroare polling (retrying...):", error.message);
             await new Promise(r => setTimeout(r, 2000));
             attempts++;
         }
@@ -203,27 +202,26 @@ async function pollProgress(id) {
 }
 
 app.get('/api/convert', async (req, res) => {
-    const { url, type } = req.query; // type: 'video' sau 'audio'
+    const { url, type } = req.query;
     const cleanUrl = sanitizeUrl(url);
     const format = type === 'audio' ? 'mp3' : 'mp4';
 
     try {
         const jobId = await startConversion(cleanUrl, format);
-        if (!jobId) return res.status(500).send("Nu s-a putut iniția conversia. Verifică logs.");
+        if (!jobId) return res.status(500).send("Nu am găsit endpoint-ul API corect sau API-ul e down.");
 
         const downloadLink = await pollProgress(jobId);
 
         if (downloadLink) {
             return res.redirect(downloadLink);
         } else {
-            return res.status(500).send("Timeout: Serverul a răspuns prea greu.");
+            return res.status(500).send("Timeout.");
         }
-
     } catch (error) {
         res.status(500).send("Eroare internă.");
     }
 });
 
 app.listen(PORT, '0.0.0.0', () => {
-    console.log(`🚀 Server FINAL pornit pe portul ${PORT}`);
+    console.log(`🚀 Server FINAL (Auto-Discovery) pornit pe portul ${PORT}`);
 });
