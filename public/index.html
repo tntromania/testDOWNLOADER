@@ -350,12 +350,12 @@
 </div>
 
 <script>
-    const SERVER_ENDPOINT = '';
-    let selectedFormat = 'mp4';
+    // CONFIGURARE
     let currentVideoUrl = '';
-    let currentPlatform = 'youtube'; // Default
+    let currentPlatform = 'youtube'; 
     let debounceTimer;
 
+    // ELEMENTE DOM
     const urlInput = document.getElementById('urlInput');
     const loading = document.getElementById('loading');
     const error = document.getElementById('error');
@@ -367,176 +367,176 @@
     const historySection = document.getElementById('historySection');
     const historyList = document.getElementById('historyList');
 
-    function loadHistory() { renderHistory(); }
+    // Inițializare istoric la încărcare
     loadHistory();
 
+    // --- 1. SCHIMBAREA FORMATULUI (TAB-uri Video/Audio) ---
     function selectFormat(format) {
-        selectedFormat = format;
+        // UI: Activăm butonul selectat
         document.querySelectorAll('.format-btn').forEach(btn => btn.classList.remove('active'));
         document.querySelector(`[data-format="${format}"]`).classList.add('active');
 
+        // UI: Arătăm selectorul de calitate potrivit
         document.getElementById('qualitySelector').style.display = (format === 'mp4') ? 'grid' : 'none';
         document.getElementById('audioQualitySelector').style.display = (format === 'mp3') ? 'grid' : 'none';
     }
 
+    // --- 2. SELECTAREA CALITĂȚII -> DECLANȘEAZĂ DOWNLOAD-UL ---
     function selectQuality(quality) {
-        const selector = selectedFormat === 'mp4' ? 'qualitySelector' : 'audioQualitySelector';
-        document.querySelectorAll(`#${selector} .quality-btn`).forEach(btn => btn.classList.remove('active'));
+        // UI: Activăm butonul de calitate
+        const formatType = document.querySelector('.format-btn.active').dataset.format; // 'mp4' sau 'mp3'
+        const selectorId = formatType === 'mp4' ? 'qualitySelector' : 'audioQualitySelector';
+        
+        document.querySelectorAll(`#${selectorId} .quality-btn`).forEach(btn => btn.classList.remove('active'));
         if(event.target) event.target.classList.add('active');
+
+        // VALIDARE: Nu descărcăm dacă nu avem un video analizat
+        if (!currentVideoUrl) {
+            alert("Te rog introdu un link valid și așteaptă analiza.");
+            return;
+        }
+
+        // CONSTRUIRE URL DOWNLOAD
+        // Backend-ul așteaptă: /api/convert?url=...&type=video&quality=1080p
+        const typeParam = formatType === 'mp4' ? 'video' : 'audio';
+        let qualityParam = quality;
+        
+        // Adăugăm 'p' la video dacă e doar număr (ex: 1080 -> 1080p)
+        if (formatType === 'mp4' && !qualityParam.includes('p') && !qualityParam.includes('K')) {
+            qualityParam += 'p';
+        }
+
+        // REDIRECT CĂTRE SERVER -> RAPIDAPI
+        const downloadUrl = `/api/convert?url=${encodeURIComponent(currentVideoUrl)}&type=${typeParam}&quality=${qualityParam}`;
+        
+        // Deschidem într-un tab nou sau redirect (depinde de preferință, window.location e mai sigur pt mobile)
+        window.location.href = downloadUrl;
+        
+        // Afișăm status utilizatorului
+        statusCard.innerHTML = `
+            <h3>🚀 Se inițiază descărcarea...</h3>
+            <p>Format: ${formatType.toUpperCase()} | Calitate: ${qualityParam}</p>
+            <p style="font-size:0.8rem; color:#ccc;">Dacă nu pornește, verifică pop-up blocker.</p>
+        `;
+        statusCard.classList.add('show');
     }
 
-    // ✅ VALIDARE STRICTĂ PLATFORMĂ
+    // --- 3. VALIDARE PLATFORMĂ ---
     function validatePlatformUrl(url, expectedPlatform) {
         const urlLower = url.toLowerCase();
         const platformPatterns = {
-            youtube: ['youtube.com', 'youtu.be'],
-            tiktok: ['tiktok.com', 'vm.tiktok.com'], // Am adăugat și short-link tiktok
+            youtube: ['youtube.com', 'youtu.be', 'youtube.com/shorts'],
+            tiktok: ['tiktok.com', 'vm.tiktok.com'],
             instagram: ['instagram.com'],
-            facebook: ['facebook.com', 'fb.watch', 'fb.com', 'messenger.com']
+            facebook: ['facebook.com', 'fb.watch', 'fb.com']
         };
         const patterns = platformPatterns[expectedPlatform];
-        // Returnează true dacă URL-ul conține unul din pattern-uri
         return patterns ? patterns.some(pattern => urlLower.includes(pattern)) : false;
     }
 
+    // --- 4. LOGICA PRINCIPALĂ: PROCESS VIDEO (DOAR INFO) ---
     async function processVideo(url = null) {
         const targetUrl = url || urlInput.value.trim();
 
-        // Verificări de bază
         if (!targetUrl || targetUrl.length < 5) return;
 
-        // Resetăm erorile vechi
+        // Reset UI
         error.classList.remove('show');
-        error.textContent = '';
-
-        // 🛑 BLOCARE DACĂ LINK-UL NU ESTE CORECT
-        if (!validatePlatformUrl(targetUrl, currentPlatform)) {
-            error.innerHTML = `⚠️ <strong>Link greșit!</strong><br>Ești pe modul <strong>${currentPlatform.toUpperCase()}</strong>, dar ai introdus un alt tip de link.<br>Selectează iconița corectă din stânga.`;
-            error.classList.add('show');
-            return; // Oprește funcția aici!
-        }
-
-        // Resetăm interfața vizuală pentru loading
         videoInfo.classList.remove('show');
         statusCard.classList.remove('show');
         transcriptSection.classList.remove('show');
-        originalTranscript.textContent = "";
-        translatedTranscript.textContent = "";
+        
+        // Validare URL vs Platformă
+        if (!validatePlatformUrl(targetUrl, currentPlatform)) {
+            error.innerHTML = `⚠️ Link-ul nu pare a fi de <strong>${currentPlatform.toUpperCase()}</strong>. Verifică iconița din stânga.`;
+            error.classList.add('show');
+            return;
+        }
 
+        currentVideoUrl = targetUrl;
         loading.classList.add('show');
-        loading.querySelector('.loading-text').textContent = `Analizez link-ul de ${currentPlatform.toUpperCase()}... ⏳`;
+        loading.querySelector('.loading-text').textContent = "Analizez metadata și transcriptul...";
 
         try {
-            // Trimitem platforma la server pentru siguranță
-            const response = await fetch(`/api/download?url=${encodeURIComponent(targetUrl)}&platform=${currentPlatform}`);
-
-            if (!response.ok) throw new Error("Serverul nu a răspuns corect.");
+            // 🔥 AICI ERA EROAREA: Acum chemăm /api/info, NU /api/download
+            const response = await fetch(`/api/info?url=${encodeURIComponent(targetUrl)}`);
+            
+            if (!response.ok) throw new Error("Server error: " + response.statusText);
             const data = await response.json();
 
-            if (data.status === 'ok') {
-                const title = data.data.title || "Video Fără Titlu";
+            // Afișăm Info
+            const title = data.title || "Video fără titlu";
+            const duration = data.duration || "--:--";
 
-                // AFIȘARE TITLU ȘI FORMAT
-                videoInfo.innerHTML = `
-                <div style="text-align:center; padding: 10px;">
-                    <h3 style="margin-bottom:10px; font-size: 1.5rem;">🎥 ${title}</h3>
-                    <p style="font-size: 1.1em; color: #aaa;">📦 Format: ${selectedFormat.toUpperCase()} | ⏱️ ${data.data.duration || '--:--'}</p>
+            videoInfo.innerHTML = `
+                <div style="text-align:center;">
+                    <h3 style="font-size: 1.3rem; margin-bottom: 5px;">${title}</h3>
+                    <p style="color:#94a3b8;">⏱️ Durată: ${duration}</p>
+                    <div style="margin-top: 15px; padding: 10px; background: rgba(74, 222, 128, 0.1); border-radius: 10px; color: #4ade80;">
+                        ✅ Analiză completă via <strong>${currentPlatform}</strong>.<br>
+                        Selectează calitatea de mai sus (ex: 1080p) pentru a descărca.
+                    </div>
                 </div>
             `;
-                videoInfo.classList.add('show');
+            videoInfo.classList.add('show');
 
-                // Gestionare Transcript (DOAR PENTRU YOUTUBE)
-                if (currentPlatform === 'youtube' && data.data.transcript) {
-                    const originalText = data.data.transcript.original || "Nu există transcript disponibil.";
-                    const translatedText = data.data.transcript.translated || "Traducere indisponibilă";
-
-                    originalTranscript.textContent = originalText;
-                    translatedTranscript.textContent = translatedText;
-                    transcriptSection.classList.add('show');
-                }
-
-                // Salvare în Istoric
-                addToHistory(title, targetUrl);
-
-                // DOWNLOAD AUTOMAT
-                const formats = data.data.formats;
-                let finalLink;
-
-                if (selectedFormat === 'mp4') {
-                    // Încercăm să găsim calitatea exactă, altfel luăm primul mp4
-                    const selectedQ = document.querySelector('#qualitySelector .active')?.dataset.quality || '1080';
-                    finalLink = formats.find(f => f.format === 'mp4' && f.quality.includes(selectedQ)) || formats.find(f => f.format === 'mp4');
-                } else {
-                    finalLink = formats.find(f => f.format === 'mp3');
-                }
-
-                if (finalLink && finalLink.url) {
-                    const a = document.createElement('a');
-                    a.href = finalLink.url;
-                    // Forțăm download-ul
-                    a.setAttribute('download', '');
-                    a.style.display = 'none';
-                    document.body.appendChild(a);
-                    a.click();
-                    setTimeout(() => document.body.removeChild(a), 100);
-
-                    statusCard.classList.add('show');
-                } else {
-                    console.warn("⚠️ Nu s-a putut genera link-ul de download.");
-                    error.textContent = "⚠️ Nu am găsit un format compatibil pentru download.";
-                    error.classList.add('show');
-                }
-
-            } else {
-                throw new Error(data.error || "Eroare necunoscută.");
+            // Afișăm Transcript (dacă există)
+            if (data.transcript) {
+                originalTranscript.textContent = data.transcript.original || "";
+                translatedTranscript.textContent = data.transcript.translated || "";
+                transcriptSection.classList.add('show');
             }
 
+            // Salvăm în istoric
+            addToHistory(title, targetUrl);
+
         } catch (err) {
-            console.error("❌ Eroare:", err);
-            error.innerHTML = '❌ <strong>Eroare:</strong> ' + err.message;
+            console.error(err);
+            error.innerHTML = `❌ Eroare la analiză. Asigură-te că link-ul este public și valid.<br><small>${err.message}</small>`;
             error.classList.add('show');
         } finally {
             loading.classList.remove('show');
         }
     }
 
-    // Debounce pentru input
+    // --- 5. EVENT LISTENERS ---
     urlInput.addEventListener('input', () => {
         clearTimeout(debounceTimer);
         const val = urlInput.value.trim();
-
-        // Ascundem eroarea când utilizatorul începe să șteargă/scrie din nou
         if(val.length === 0) error.classList.remove('show');
 
         debounceTimer = setTimeout(() => {
             if (val.length > 10 && val.startsWith('http')) {
                 processVideo(val);
             }
-        }, 1000); // Așteaptă 1 secundă după ce te oprești din scris
+        }, 1000);
     });
 
-    function copyTranscript(type) {
-        const id = type === 'original' ? 'originalTranscript' : 'translatedTranscript';
-        const text = document.getElementById(id).textContent;
-        if(!text) return;
-        navigator.clipboard.writeText(text).then(() => alert("✅ Copiat!"));
-    }
+    // --- 6. FUNCȚII AUXILIARE (Istoric, Copy, Change Platform) ---
+    
+    function changePlatform(platform, placeholder) {
+        currentPlatform = platform;
+        urlInput.value = '';
+        urlInput.placeholder = placeholder;
+        // Resetăm stările
+        error.classList.remove('show');
+        videoInfo.classList.remove('show');
+        transcriptSection.classList.remove('show');
+        statusCard.classList.remove('show');
 
-    function downloadTxt(type) {
-        const id = type === 'original' ? 'originalTranscript' : 'translatedTranscript';
-        const text = document.getElementById(id).textContent;
-        if(!text) return;
-        const blob = new Blob([text], {type: 'text/plain'});
-        const a = document.createElement('a');
-        a.href = URL.createObjectURL(blob);
-        a.download = `transcript_${type}.txt`;
-        a.click();
+        document.body.className = `theme-${platform}`;
+        document.querySelectorAll('.nav-item').forEach(i => i.classList.remove('active'));
+        document.querySelector(`[data-platform="${platform}"]`).classList.add('active');
+        document.getElementById('pageTitle').textContent = platform.charAt(0).toUpperCase() + platform.slice(1) + ' Downloader';
     }
 
     function addToHistory(title, url) {
         let history = JSON.parse(localStorage.getItem('dl_history') || '[]');
-        history = history.filter(h => h.url !== url); // Evită duplicate
+        // Eliminăm duplicatele
+        history = history.filter(h => h.url !== url);
+        // Adăugăm la început
         history.unshift({ title, url, date: new Date().toLocaleTimeString(), platform: currentPlatform });
+        // Păstrăm doar ultimele 5
         if(history.length > 5) history.pop();
         localStorage.setItem('dl_history', JSON.stringify(history));
         renderHistory();
@@ -550,33 +550,38 @@
         }
         historySection.style.display = 'block';
         historyList.innerHTML = history.map(item => `
-            <li class="history-item" onclick="changePlatform('${item.platform || 'youtube'}', 'Paste link...'); urlInput.value='${item.url}'; processVideo('${item.url}')">
+            <li class="history-item" onclick="changePlatform('${item.platform || 'youtube'}', 'Link...'); urlInput.value='${item.url}'; processVideo('${item.url}')">
                 <div class="h-info">
                     <h4>${item.title.substring(0, 40)}...</h4>
-                    <span>${item.date} • ${item.platform ? item.platform.toUpperCase() : 'YT'}</span>
+                    <span>${item.platform ? item.platform.toUpperCase() : 'YT'} • ${item.date}</span>
                 </div>
                 <div class="h-arrow">🔄</div>
             </li>
         `).join('');
     }
-
+    
+    function loadHistory() { renderHistory(); }
+    
     function clearHistory() {
         localStorage.removeItem('dl_history');
         renderHistory();
     }
 
-    function changePlatform(platform, placeholder) {
-        currentPlatform = platform;
-        urlInput.value = '';
-        error.classList.remove('show'); // Ascunde erorile vechi la schimbarea tab-ului
-        videoInfo.classList.remove('show');
-        transcriptSection.classList.remove('show');
+    function copyTranscript(type) {
+        const id = type === 'original' ? 'originalTranscript' : 'translatedTranscript';
+        const text = document.getElementById(id).textContent;
+        if(text) navigator.clipboard.writeText(text).then(() => alert("Copiat în clipboard!"));
+    }
 
-        document.body.className = `theme-${platform}`;
-        document.querySelectorAll('.nav-item').forEach(i => i.classList.remove('active'));
-        document.querySelector(`[data-platform="${platform}"]`).classList.add('active');
-        urlInput.placeholder = placeholder;
-        document.getElementById('pageTitle').textContent = platform.charAt(0).toUpperCase() + platform.slice(1) + ' Downloader';
+    function downloadTxt(type) {
+        const id = type === 'original' ? 'originalTranscript' : 'translatedTranscript';
+        const text = document.getElementById(id).textContent;
+        if(!text) return;
+        const blob = new Blob([text], {type: 'text/plain'});
+        const a = document.createElement('a');
+        a.href = URL.createObjectURL(blob);
+        a.download = `transcript_${type}.txt`;
+        a.click();
     }
 </script>
 </body>
