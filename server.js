@@ -26,120 +26,73 @@ function extractVideoId(url) {
 app.get('/api/process', async (req, res) => {
     const { url } = req.query;
     const videoId = extractVideoId(url);
-    
     if (!videoId) return res.status(400).json({ error: 'ID negăsit' });
 
-    console.log(`\n--- PROCESARE VIDEO: ${videoId} ---`);
+    console.log(`--- START PROCESARE: ${videoId} ---`);
 
     try {
-        const headers = { 
-            'X-RapidAPI-Key': RAPIDAPI_KEY, 
-            'X-RapidAPI-Host': RAPIDAPI_HOST 
-        };
+        const headers = { 'X-RapidAPI-Key': RAPIDAPI_KEY, 'X-RapidAPI-Host': RAPIDAPI_HOST };
 
-        // Cerem Info (care conține și download-urile) și Subtitrările separat
-        const [videoRes, subtitleRes] = await Promise.allSettled([
-            axios.get(`https://${RAPIDAPI_HOST}/video.php`, { params: { id: videoId }, headers }),
-            axios.get(`https://${RAPIDAPI_HOST}/subtitle.php`, { params: { id: videoId }, headers })
-        ]);
+        // PASUL 1: Luăm Titlul (din /video.php)
+        const videoInfo = await axios.get(`https://${RAPIDAPI_HOST}/video.php`, { params: { id: videoId }, headers });
+        const title = videoInfo.data.data?.title || "Video YouTube";
 
-        let title = "Video YouTube";
+        // PASUL 2: Luăm LINK-URILE (din /download.php - conform doc-ului tău)
+        console.log(`📡 Cerem link-uri de download pentru ${videoId}...`);
+        const downloadRes = await axios.get(`https://${RAPIDAPI_HOST}/download.php`, { params: { id: videoId }, headers });
+        
+        // Verificăm unde sunt ascunse link-urile în răspuns
+        const rawDownloadData = downloadRes.data;
+        // Unele API-uri pun datele în .data, altele direct în rădăcină
+        const formatList = Array.isArray(rawDownloadData) ? rawDownloadData : (rawDownloadData.data || []);
+
         let downloadLinks = [];
+        formatList.forEach(f => {
+            // Căutăm orice câmp care seamănă a URL (url, link, sau download)
+            const dUrl = f.url || f.link || f.download;
+            if (dUrl) {
+                downloadLinks.push({
+                    type: (f.type && f.type.includes('audio')) ? 'audio' : 'video',
+                    url: dUrl,
+                    label: `${f.quality || f.qualityLabel || 'MP4'} (${f.container || f.extension || 'file'})`
+                });
+            }
+        });
+
+        // PASUL 3: Subtitrări & Traducere
+        const subRes = await axios.get(`https://${RAPIDAPI_HOST}/subtitle.php`, { params: { id: videoId }, headers }).catch(() => null);
         let transcriptText = "Nu există subtitrări disponibile.";
         let translatedText = "Fără traducere.";
 
-        // 1. PROCESARE VIDEO & DOWNLOADS
-        if (videoRes.status === 'fulfilled') {
-            const apiFullResponse = videoRes.value.data;
-            const videoData = apiFullResponse.data || {};
-            
-            title = videoData.title || title;
+        if (subRes && subRes.data.data) {
+            const enSub = subRes.data.data.find(s => s.lang === 'en') || subRes.data.data[0];
+            if (enSub?.url) {
+                const subFile = await axios.get(enSub.url);
+                transcriptText = String(subFile.data).replace(/<[^>]*>/g, ' ').replace(/\s+/g, ' ').trim();
 
-            // Colectăm toate sursele posibile de link-uri (combinăm formats cu adaptive_formats)
-            const allFormats = [
-                ...(videoData.formats || []),
-                ...(videoData.adaptive_formats || [])
-            ];
-
-            console.log(`Am găsit ${allFormats.length} formate în total.`);
-
-            allFormats.forEach(f => {
-                if (f.url) {
-                    const isVideo = f.type && f.type.includes('video') || f.container === 'mp4';
-                    const isAudio = f.type && f.type.includes('audio') || f.extension === 'm4a' || f.extension === 'mp3';
-
-                    if (isVideo) {
-                        downloadLinks.push({ 
-                            type: 'video', 
-                            url: f.url, 
-                            label: `VIDEO ${f.quality || f.qualityLabel || 'MP4'}` 
-                        });
-                    } else if (isAudio) {
-                        downloadLinks.push({ 
-                            type: 'audio', 
-                            url: f.url, 
-                            label: 'AUDIO (MP3/M4A)' 
-                        });
-                    }
-                }
-            });
-
-            // Eliminăm duplicatele de URL
-            downloadLinks = downloadLinks.filter((v, i, a) => a.findIndex(t => (t.url === v.url)) === i);
-        }
-
-        // 2. PROCESARE SUBTITRĂRI
-        if (subtitleRes.status === 'fulfilled') {
-            const subtitleData = subtitleRes.value.data.data || [];
-            if (Array.isArray(subtitleData) && subtitleData.length > 0) {
-                // Căutăm Engleză, dacă nu, luăm prima disponibilă
-                const chosenSub = subtitleData.find(s => s.lang === 'en') || subtitleData[0];
-                
-                if (chosenSub && chosenSub.url) {
-                    try {
-                        const subContent = await axios.get(chosenSub.url);
-                        let raw = typeof subContent.data === 'string' ? subContent.data : JSON.stringify(subContent.data);
-                        
-                        // Curățăm textul de mizerii XML/VTT/Timestamp-uri
-                        transcriptText = raw
-                            .replace(/<[^>]*>/g, ' ')
-                            .replace(/WEBVTT/g, '')
-                            .replace(/\d+:\d+:\d+\.\d+ --> \d+:\d+:\d+\.\d+/g, '')
-                            .replace(/\s+/g, ' ')
-                            .trim();
-
-                        // TRADUCERE GPT-4o-mini
-                        if (process.env.OPENAI_API_KEY && transcriptText.length > 20) {
-                            const completion = await openai.chat.completions.create({
-                                model: "gpt-4o-mini",
-                                messages: [
-                                    { role: "system", content: "Ești un asistent care face rezumate video în limba română." },
-                                    { role: "user", content: `Fă un rezumat scurt pentru: ${transcriptText.substring(0, 4000)}` }
-                                ]
-                            });
-                            translatedText = completion.choices[0].message.content;
-                        }
-                    } catch (e) { console.error("Eroare la descărcarea fișierului de subtitrare."); }
+                if (process.env.OPENAI_API_KEY) {
+                    const gpt = await openai.chat.completions.create({
+                        model: "gpt-4o-mini",
+                        messages: [{ role: "system", content: "Rezumat scurt în română." }, { role: "user", content: transcriptText.substring(0, 3000) }]
+                    });
+                    translatedText = gpt.choices[0].message.content;
                 }
             }
         }
 
-        console.log(`✅ Procesare gata: ${title} | Download-uri: ${downloadLinks.length}`);
+        console.log(`✅ GATA. Titlu: ${title} | Link-uri găsite: ${downloadLinks.length}`);
 
         res.json({
             success: true,
             title: title,
-            downloads: downloadLinks.slice(0, 5), // Trimitem primele 5 cele mai relevante
-            transcript: {
-                original: transcriptText.substring(0, 2000),
-                translated: translatedText
-            }
+            downloads: downloadLinks.slice(0, 10), // Trimitem primele 10 formate
+            transcript: { original: transcriptText.substring(0, 1000), translated: translatedText }
         });
 
     } catch (error) {
-        console.error("❌ Eroare Server:", error.message);
-        res.status(500).json({ error: 'Eroare la procesarea API-ului.' });
+        console.error("❌ EROARE:", error.message);
+        res.status(500).json({ success: false, error: error.message });
     }
 });
 
-app.listen(PORT, '0.0.0.0', () => console.log(`🚀 Server pornit pe portul ${PORT}`));
+app.listen(PORT, '0.0.0.0', () => console.log(`🚀 Server fixat pe portul ${PORT}`));
