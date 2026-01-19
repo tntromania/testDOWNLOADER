@@ -4,6 +4,7 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Universal Downloader Pro</title>
+    <link rel="icon" href="data:,">
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;500;700;800&display=swap" rel="stylesheet">
@@ -27,67 +28,33 @@
 
         /* --- BACKGROUND ANIMATION --- */
         body::before {
-            content: '';
-            position: fixed;
-            top: -50%; left: -50%; width: 200%; height: 200%;
+            content: ''; position: fixed; top: -50%; left: -50%; width: 200%; height: 200%;
             background: radial-gradient(circle, var(--glow-1, rgba(76, 29, 149, 0.4)) 0%, rgba(15, 23, 42, 0) 50%),
             radial-gradient(circle, var(--glow-2, rgba(56, 189, 248, 0.2)) 0%, rgba(15, 23, 42, 0) 60%);
-            background-size: 100% 100%;
-            animation: moveBackground 15s ease-in-out infinite alternate;
-            z-index: -1;
-            transition: 1s ease;
+            background-size: 100% 100%; animation: moveBackground 15s ease-in-out infinite alternate; z-index: -1; transition: 1s ease;
         }
-
         body.theme-youtube::before { --glow-1: rgba(220, 38, 38, 0.3); --glow-2: rgba(15, 23, 42, 0); }
         body.theme-tiktok::before { --glow-1: rgba(34, 211, 238, 0.2); --glow-2: rgba(232, 28, 255, 0.2); }
         body.theme-instagram::before { --glow-1: rgba(245, 158, 11, 0.2); --glow-2: rgba(217, 70, 239, 0.2); }
         body.theme-facebook::before { --glow-1: rgba(37, 99, 235, 0.3); --glow-2: rgba(15, 23, 42, 0); }
 
-        @keyframes moveBackground {
-            0% { transform: translate(0, 0); }
-            100% { transform: translate(-50px, -50px); }
-        }
+        @keyframes moveBackground { 0% { transform: translate(0, 0); } 100% { transform: translate(-50px, -50px); } }
 
         /* --- LAYOUT WRAPPER --- */
-        .app-wrapper {
-            display: flex;
-            gap: 30px;
-            align-items: flex-start;
-            max-width: 1100px;
-            width: 100%;
-            position: relative;
-            z-index: 1;
-        }
+        .app-wrapper { display: flex; gap: 30px; align-items: flex-start; max-width: 1100px; width: 100%; position: relative; z-index: 1; }
 
         /* --- SIDEBAR --- */
         .sidebar {
-            background: rgba(30, 41, 59, 0.6);
-            backdrop-filter: blur(20px);
-            border: 1px solid rgba(255, 255, 255, 0.1);
-            border-radius: 24px;
-            padding: 20px;
-            display: flex;
-            flex-direction: column;
-            gap: 20px;
-            position: sticky;
-            top: 20px;
-            height: fit-content;
+            background: rgba(30, 41, 59, 0.6); backdrop-filter: blur(20px); border: 1px solid rgba(255, 255, 255, 0.1);
+            border-radius: 24px; padding: 20px; display: flex; flex-direction: column; gap: 20px; position: sticky; top: 20px; height: fit-content;
         }
-
         .nav-item {
-            width: 60px; height: 60px;
-            border-radius: 16px;
-            display: flex; justify-content: center; align-items: center;
-            cursor: pointer;
-            transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
-            background: rgba(255, 255, 255, 0.05);
-            border: 1px solid transparent;
+            width: 60px; height: 60px; border-radius: 16px; display: flex; justify-content: center; align-items: center; cursor: pointer;
+            transition: all 0.3s; background: rgba(255, 255, 255, 0.05); border: 1px solid transparent;
         }
-
         .nav-item svg { width: 28px; height: 28px; fill: #94a3b8; transition: 0.3s; }
         .nav-item:hover { transform: translateY(-3px); background: rgba(255, 255, 255, 0.1); }
         .nav-item.active { background: #fff; box-shadow: 0 0 20px rgba(255, 255, 255, 0.2); }
-
         .nav-item[data-platform="youtube"].active svg { fill: #ef4444; }
         .nav-item[data-platform="tiktok"].active svg { fill: #000; }
         .nav-item[data-platform="instagram"].active svg { fill: #d62976; }
@@ -95,145 +62,88 @@
         .nav-item:not(.active):hover svg { fill: #fff; }
 
         /* --- CONTENT AREA --- */
-        .content-area {
-            flex: 1;
-            display: flex;
-            flex-direction: column;
-            gap: 20px;
-        }
-
-        /* --- MAIN CARD --- */
+        .content-area { flex: 1; display: flex; flex-direction: column; gap: 20px; }
         .main-card {
-            background: rgba(30, 41, 59, 0.4);
-            backdrop-filter: blur(20px);
-            -webkit-backdrop-filter: blur(20px);
-            border: 1px solid rgba(255, 255, 255, 0.1);
-            border-radius: 30px;
-            padding: 50px;
-            box-shadow: 0 25px 50px -12px rgba(0, 0, 0, 0.5);
-            transition: all 0.4s ease;
+            background: rgba(30, 41, 59, 0.4); backdrop-filter: blur(20px); border: 1px solid rgba(255, 255, 255, 0.1);
+            border-radius: 30px; padding: 50px; box-shadow: 0 25px 50px -12px rgba(0, 0, 0, 0.5); transition: all 0.4s ease;
         }
 
         .header { text-align: center; margin-bottom: 40px; }
         .header h1 {
             font-size: 3.5rem; font-weight: 800; letter-spacing: -1px; margin-bottom: 10px;
-            background: linear-gradient(to right, #60a5fa, #c084fc, #f472b6);
-            -webkit-background-clip: text; background-clip: text; color: transparent;
+            background: linear-gradient(to right, #60a5fa, #c084fc, #f472b6); -webkit-background-clip: text; color: transparent;
         }
         .header p { font-size: 1.1rem; color: #94a3b8; font-weight: 300; }
 
-        .input-wrapper { position: relative; margin-bottom: 30px; }
+        /* --- INPUT MODIFICAT CU BUTON --- */
+        .input-group { margin-bottom: 30px; }
+        .input-wrapper { display: flex; gap: 10px; }
         input {
-            width: 100%; padding: 20px 30px; font-size: 1.1rem;
-            background: rgba(15, 23, 42, 0.6);
-            border: 2px solid rgba(255, 255, 255, 0.05);
-            border-radius: 20px; color: #fff; font-family: 'Outfit', sans-serif;
-            transition: all 0.3s;
+            flex: 1; padding: 20px 30px; font-size: 1.1rem; background: rgba(15, 23, 42, 0.6);
+            border: 2px solid rgba(255, 255, 255, 0.05); border-radius: 20px; color: #fff; font-family: 'Outfit', sans-serif; transition: all 0.3s;
         }
-        input:focus {
-            outline: none; border-color: #818cf8; background: rgba(15, 23, 42, 0.8);
-            box-shadow: 0 0 0 4px rgba(129, 140, 248, 0.2);
+        input:focus { outline: none; border-color: #818cf8; background: rgba(15, 23, 42, 0.8); }
+
+        .search-btn {
+            padding: 0 30px; font-size: 1.1rem; font-weight: 700; color: #fff;
+            background: linear-gradient(135deg, #6366f1 0%, #8b5cf6 100%);
+            border: none; border-radius: 20px; cursor: pointer; transition: 0.3s;
         }
+        .search-btn:hover { transform: scale(1.05); box-shadow: 0 10px 20px rgba(99, 102, 241, 0.4); }
 
         .format-selector { display: flex; gap: 15px; margin-bottom: 25px; }
         .format-btn {
-            flex: 1; padding: 15px; border: 1px solid rgba(255, 255, 255, 0.1);
-            background: rgba(255, 255, 255, 0.03); color: #94a3b8;
-            border-radius: 15px; cursor: pointer; font-weight: 600; transition: all 0.3s;
-            font-family: 'Outfit', sans-serif;
+            flex: 1; padding: 15px; border: 1px solid rgba(255, 255, 255, 0.1); background: rgba(255, 255, 255, 0.03); color: #94a3b8;
+            border-radius: 15px; cursor: pointer; font-weight: 600; transition: all 0.3s; font-family: 'Outfit', sans-serif;
         }
         .format-btn.active {
-            background: linear-gradient(135deg, #6366f1 0%, #a855f7 100%);
-            border-color: transparent; color: white;
+            background: linear-gradient(135deg, #6366f1 0%, #a855f7 100%); border-color: transparent; color: white;
             box-shadow: 0 10px 20px -10px rgba(168, 85, 247, 0.5);
         }
 
-        .quality-selector, #audioQualitySelector {
-            display: grid; grid-template-columns: repeat(auto-fit, minmax(80px, 1fr));
-            gap: 10px; margin-bottom: 30px;
-        }
+        .quality-selector, #audioQualitySelector { display: grid; grid-template-columns: repeat(auto-fit, minmax(80px, 1fr)); gap: 10px; margin-bottom: 30px; }
         .quality-btn {
-            padding: 10px; border: 1px solid rgba(255, 255, 255, 0.1);
-            background: rgba(255, 255, 255, 0.03); color: #94a3b8;
+            padding: 10px; border: 1px solid rgba(255, 255, 255, 0.1); background: rgba(255, 255, 255, 0.03); color: #94a3b8;
             border-radius: 12px; cursor: pointer; font-weight: 500; transition: all 0.2s;
         }
         .quality-btn:hover { color: #fff; border-color: #6366f1; }
         .quality-btn.active { background: #fff; color: #0f172a; font-weight: 700; }
 
-        /* --- VIDEO INFO (FĂRĂ THUMBNAIL) --- */
-        .video-info {
-            display: none;
-            background: rgba(255, 255, 255, 0.05);
-            padding: 20px;
-            border-radius: 20px;
-            margin-bottom: 20px;
-            border-left: 4px solid #818cf8;
-            animation: fadeIn 0.5s;
-        }
+        .video-info { display: none; background: rgba(255, 255, 255, 0.05); padding: 20px; border-radius: 20px; margin-bottom: 20px; border-left: 4px solid #818cf8; animation: fadeIn 0.5s; }
         .video-info.show { display: block; }
         .video-info h3 { margin: 0 0 5px 0; font-size: 1.1rem; color: #fff; }
-        .video-info p { margin: 0; font-size: 0.9rem; color: #94a3b8; }
 
-        /* --- STATUS & TRANSCRIPT --- */
         .loading { display: none; text-align: center; padding: 40px; animation: fadeIn 0.5s; }
         .loading.show { display: block; }
         .spinner { width: 50px; height: 50px; border: 3px solid rgba(255,255,255,0.1); border-top-color: #818cf8; border-radius: 50%; animation: spin 1s infinite; margin: 0 auto 15px; }
 
-        .status-card {
-            display: none; background: rgba(16, 185, 129, 0.1); border: 1px solid rgba(16, 185, 129, 0.3);
-            color: #34d399; padding: 25px; border-radius: 20px; text-align: center; margin-top: 20px;
-        }
+        .status-card { display: none; background: rgba(16, 185, 129, 0.1); border: 1px solid rgba(16, 185, 129, 0.3); color: #34d399; padding: 25px; border-radius: 20px; text-align: center; margin-top: 20px; }
         .status-card.show { display: block; animation: slideUp 0.4s; }
 
         .transcript-section { display: none; margin-top: 30px; gap: 20px; }
         .transcript-section.show { display: grid; grid-template-columns: 1fr 1fr; animation: fadeIn 0.5s; }
-
-        .transcript-box {
-            background: rgba(15, 23, 42, 0.6); border: 1px solid rgba(255, 255, 255, 0.05);
-            border-radius: 20px; padding: 20px; height: 400px; display: flex; flex-direction: column;
-        }
+        .transcript-box { background: rgba(15, 23, 42, 0.6); border: 1px solid rgba(255, 255, 255, 0.05); border-radius: 20px; padding: 20px; height: 400px; display: flex; flex-direction: column; }
         .transcript-box h3 { font-size: 0.9rem; color: #94a3b8; margin-bottom: 15px; display: flex; justify-content: space-between; align-items: center; }
+        .transcript-content { flex: 1; background: rgba(0, 0, 0, 0.2); border-radius: 12px; padding: 15px; overflow-y: auto; color: #e2e8f0; line-height: 1.6; font-size: 0.95rem; white-space: pre-wrap; }
 
         .btn-group { display: flex; gap: 8px; }
-        .action-btn {
-            background: rgba(255, 255, 255, 0.1); border: none; color: #fff;
-            padding: 6px 12px; border-radius: 8px; font-size: 0.75rem; cursor: pointer; transition: 0.2s;
-        }
+        .action-btn { background: rgba(255, 255, 255, 0.1); border: none; color: #fff; padding: 6px 12px; border-radius: 8px; font-size: 0.75rem; cursor: pointer; transition: 0.2s; }
         .action-btn:hover { background: #fff; color: #000; }
         .action-btn.txt { background: rgba(52, 211, 153, 0.2); color: #34d399; }
         .action-btn.txt:hover { background: #34d399; color: #000; }
 
-        .transcript-content {
-            flex: 1; background: rgba(0, 0, 0, 0.2); border-radius: 12px; padding: 15px;
-            overflow-y: auto; color: #e2e8f0; line-height: 1.6; font-size: 0.95rem; white-space: pre-wrap;
-        }
-
         .error { display: none; }
         .error.show { display: block; background: rgba(239, 68, 68, 0.1); color: #fca5a5; padding: 15px; border-radius: 12px; margin-top: 20px; }
 
-        /* --- HISTORY SECTION (TEXT ONLY) --- */
-        .history-section {
-            background: rgba(30, 41, 59, 0.4);
-            border: 1px solid rgba(255, 255, 255, 0.05);
-            border-radius: 24px;
-            padding: 25px;
-            margin-top: 0;
-        }
+        .history-section { background: rgba(30, 41, 59, 0.4); border: 1px solid rgba(255, 255, 255, 0.05); border-radius: 24px; padding: 25px; margin-top: 0; }
         .history-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 15px; }
         .history-header h3 { font-size: 1.1rem; color: #e2e8f0; }
         .clear-btn { font-size: 0.8rem; color: #94a3b8; cursor: pointer; background: none; border: none; }
-        .clear-btn:hover { color: #fca5a5; }
-
         .history-list { list-style: none; display: flex; flex-direction: column; gap: 10px; }
-        .history-item {
-            display: flex; justify-content: space-between; align-items: center;
-            padding: 15px; background: rgba(255, 255, 255, 0.03);
-            border-radius: 12px; cursor: pointer; transition: 0.2s;
-        }
+        .history-item { display: flex; justify-content: space-between; align-items: center; padding: 15px; background: rgba(255, 255, 255, 0.03); border-radius: 12px; cursor: pointer; transition: 0.2s; }
         .history-item:hover { background: rgba(255, 255, 255, 0.08); transform: translateX(5px); }
         .h-info h4 { font-size: 0.95rem; margin: 0 0 4px 0; color: #cbd5e1; }
         .h-info span { font-size: 0.75rem; color: #64748b; }
-        .h-arrow { color: #94a3b8; font-size: 1.2rem; }
 
         @media (max-width: 900px) {
             .app-wrapper { flex-direction: column; align-items: center; }
@@ -245,7 +155,6 @@
         @keyframes spin { 100% { transform: rotate(360deg); } }
         @keyframes fadeIn { from { opacity: 0; transform: translateY(10px); } to { opacity: 1; transform: translateY(0); } }
         @keyframes slideUp { from { opacity: 0; transform: translateY(20px); } to { opacity: 1; transform: translateY(0); } }
-
     </style>
 </head>
 <body class="theme-youtube">
@@ -281,6 +190,7 @@
             <div class="input-group">
                 <div class="input-wrapper">
                     <input type="text" id="urlInput" placeholder="Paste YouTube Link here..." autocomplete="off">
+                    <button class="search-btn" onclick="processVideo()">CAUTĂ</button>
                 </div>
             </div>
 
@@ -350,12 +260,9 @@
 </div>
 
 <script>
-    // CONFIGURARE
     let currentVideoUrl = '';
-    let currentPlatform = 'youtube'; 
-    let debounceTimer;
+    let currentPlatform = 'youtube';
 
-    // ELEMENTE DOM
     const urlInput = document.getElementById('urlInput');
     const loading = document.getElementById('loading');
     const error = document.getElementById('error');
@@ -367,61 +274,40 @@
     const historySection = document.getElementById('historySection');
     const historyList = document.getElementById('historyList');
 
-    // Inițializare istoric la încărcare
     loadHistory();
 
-    // --- 1. SCHIMBAREA FORMATULUI (TAB-uri Video/Audio) ---
     function selectFormat(format) {
-        // UI: Activăm butonul selectat
         document.querySelectorAll('.format-btn').forEach(btn => btn.classList.remove('active'));
         document.querySelector(`[data-format="${format}"]`).classList.add('active');
-
-        // UI: Arătăm selectorul de calitate potrivit
         document.getElementById('qualitySelector').style.display = (format === 'mp4') ? 'grid' : 'none';
         document.getElementById('audioQualitySelector').style.display = (format === 'mp3') ? 'grid' : 'none';
     }
 
-    // --- 2. SELECTAREA CALITĂȚII -> DECLANȘEAZĂ DOWNLOAD-UL ---
     function selectQuality(quality) {
-        // UI: Activăm butonul de calitate
-        const formatType = document.querySelector('.format-btn.active').dataset.format; // 'mp4' sau 'mp3'
+        const formatType = document.querySelector('.format-btn.active').dataset.format;
         const selectorId = formatType === 'mp4' ? 'qualitySelector' : 'audioQualitySelector';
-        
+
         document.querySelectorAll(`#${selectorId} .quality-btn`).forEach(btn => btn.classList.remove('active'));
         if(event.target) event.target.classList.add('active');
 
-        // VALIDARE: Nu descărcăm dacă nu avem un video analizat
         if (!currentVideoUrl) {
-            alert("Te rog introdu un link valid și așteaptă analiza.");
+            alert("⚠️ Te rog să apeși butonul CAUTĂ înainte să descarci!");
             return;
         }
 
-        // CONSTRUIRE URL DOWNLOAD
-        // Backend-ul așteaptă: /api/convert?url=...&type=video&quality=1080p
         const typeParam = formatType === 'mp4' ? 'video' : 'audio';
         let qualityParam = quality;
-        
-        // Adăugăm 'p' la video dacă e doar număr (ex: 1080 -> 1080p)
         if (formatType === 'mp4' && !qualityParam.includes('p') && !qualityParam.includes('K')) {
             qualityParam += 'p';
         }
 
-        // REDIRECT CĂTRE SERVER -> RAPIDAPI
         const downloadUrl = `/api/convert?url=${encodeURIComponent(currentVideoUrl)}&type=${typeParam}&quality=${qualityParam}`;
-        
-        // Deschidem într-un tab nou sau redirect (depinde de preferință, window.location e mai sigur pt mobile)
         window.location.href = downloadUrl;
-        
-        // Afișăm status utilizatorului
-        statusCard.innerHTML = `
-            <h3>🚀 Se inițiază descărcarea...</h3>
-            <p>Format: ${formatType.toUpperCase()} | Calitate: ${qualityParam}</p>
-            <p style="font-size:0.8rem; color:#ccc;">Dacă nu pornește, verifică pop-up blocker.</p>
-        `;
+
+        statusCard.innerHTML = `<h3>🚀 Se inițiază descărcarea...</h3><p>${formatType.toUpperCase()} - ${qualityParam}</p>`;
         statusCard.classList.add('show');
     }
 
-    // --- 3. VALIDARE PLATFORMĂ ---
     function validatePlatformUrl(url, expectedPlatform) {
         const urlLower = url.toLowerCase();
         const platformPatterns = {
@@ -430,14 +316,12 @@
             instagram: ['instagram.com'],
             facebook: ['facebook.com', 'fb.watch', 'fb.com']
         };
-        const patterns = platformPatterns[expectedPlatform];
-        return patterns ? patterns.some(pattern => urlLower.includes(pattern)) : false;
+        return platformPatterns[expectedPlatform] ? platformPatterns[expectedPlatform].some(p => urlLower.includes(p)) : false;
     }
 
-    // --- 4. LOGICA PRINCIPALĂ: PROCESS VIDEO (DOAR INFO) ---
+    // --- FUNCȚIA PRINCIPALĂ: NU MAI PORNEȘTE SINGURĂ ---
     async function processVideo(url = null) {
         const targetUrl = url || urlInput.value.trim();
-
         if (!targetUrl || targetUrl.length < 5) return;
 
         // Reset UI
@@ -445,80 +329,56 @@
         videoInfo.classList.remove('show');
         statusCard.classList.remove('show');
         transcriptSection.classList.remove('show');
-        
-        // Validare URL vs Platformă
+
         if (!validatePlatformUrl(targetUrl, currentPlatform)) {
-            error.innerHTML = `⚠️ Link-ul nu pare a fi de <strong>${currentPlatform.toUpperCase()}</strong>. Verifică iconița din stânga.`;
+            error.innerHTML = `⚠️ Link incorect pentru <strong>${currentPlatform.toUpperCase()}</strong>.`;
             error.classList.add('show');
             return;
         }
 
         currentVideoUrl = targetUrl;
         loading.classList.add('show');
-        loading.querySelector('.loading-text').textContent = "Analizez metadata și transcriptul...";
+        loading.querySelector('.loading-text').textContent = "Se obțin informațiile și transcriptul...";
 
         try {
-            // 🔥 AICI ERA EROAREA: Acum chemăm /api/info, NU /api/download
             const response = await fetch(`/api/info?url=${encodeURIComponent(targetUrl)}`);
-            
-            if (!response.ok) throw new Error("Server error: " + response.statusText);
+            if (!response.ok) throw new Error("Eroare comunicare server");
             const data = await response.json();
 
-            // Afișăm Info
-            const title = data.title || "Video fără titlu";
+            const title = data.title || "Video";
             const duration = data.duration || "--:--";
 
             videoInfo.innerHTML = `
                 <div style="text-align:center;">
-                    <h3 style="font-size: 1.3rem; margin-bottom: 5px;">${title}</h3>
-                    <p style="color:#94a3b8;">⏱️ Durată: ${duration}</p>
-                    <div style="margin-top: 15px; padding: 10px; background: rgba(74, 222, 128, 0.1); border-radius: 10px; color: #4ade80;">
-                        ✅ Analiză completă via <strong>${currentPlatform}</strong>.<br>
-                        Selectează calitatea de mai sus (ex: 1080p) pentru a descărca.
-                    </div>
+                    <h3 style="font-size: 1.4rem;">${title}</h3>
+                    <p style="color:#aaa;">⏱️ ${duration}</p>
+                    <p style="color:#4ade80; margin-top:10px;">✅ Gata! Alege calitatea pentru a descărca.</p>
                 </div>
             `;
             videoInfo.classList.add('show');
 
-            // Afișăm Transcript (dacă există)
             if (data.transcript) {
                 originalTranscript.textContent = data.transcript.original || "";
                 translatedTranscript.textContent = data.transcript.translated || "";
                 transcriptSection.classList.add('show');
             }
-
-            // Salvăm în istoric
             addToHistory(title, targetUrl);
 
         } catch (err) {
             console.error(err);
-            error.innerHTML = `❌ Eroare la analiză. Asigură-te că link-ul este public și valid.<br><small>${err.message}</small>`;
+            error.innerHTML = `❌ Eroare: Nu am putut analiza video-ul.<br><small>${err.message}</small>`;
             error.classList.add('show');
         } finally {
             loading.classList.remove('show');
         }
     }
 
-    // --- 5. EVENT LISTENERS ---
-    urlInput.addEventListener('input', () => {
-        clearTimeout(debounceTimer);
-        const val = urlInput.value.trim();
-        if(val.length === 0) error.classList.remove('show');
+    // --- (AM ȘTERS EVENT LISTENER-UL "INPUT") ---
 
-        debounceTimer = setTimeout(() => {
-            if (val.length > 10 && val.startsWith('http')) {
-                processVideo(val);
-            }
-        }, 1000);
-    });
-
-    // --- 6. FUNCȚII AUXILIARE (Istoric, Copy, Change Platform) ---
-    
     function changePlatform(platform, placeholder) {
         currentPlatform = platform;
         urlInput.value = '';
         urlInput.placeholder = placeholder;
-        // Resetăm stările
         error.classList.remove('show');
         videoInfo.classList.remove('show');
         transcriptSection.classList.remove('show');
@@ -532,11 +392,8 @@
 
     function addToHistory(title, url) {
         let history = JSON.parse(localStorage.getItem('dl_history') || '[]');
-        // Eliminăm duplicatele
         history = history.filter(h => h.url !== url);
-        // Adăugăm la început
         history.unshift({ title, url, date: new Date().toLocaleTimeString(), platform: currentPlatform });
-        // Păstrăm doar ultimele 5
         if(history.length > 5) history.pop();
         localStorage.setItem('dl_history', JSON.stringify(history));
         renderHistory();
@@ -544,44 +401,24 @@
 
     function renderHistory() {
         let history = JSON.parse(localStorage.getItem('dl_history') || '[]');
-        if (history.length === 0) {
-            historySection.style.display = 'none';
-            return;
-        }
+        if (history.length === 0) { historySection.style.display = 'none'; return; }
         historySection.style.display = 'block';
         historyList.innerHTML = history.map(item => `
-            <li class="history-item" onclick="changePlatform('${item.platform || 'youtube'}', 'Link...'); urlInput.value='${item.url}'; processVideo('${item.url}')">
-                <div class="h-info">
-                    <h4>${item.title.substring(0, 40)}...</h4>
-                    <span>${item.platform ? item.platform.toUpperCase() : 'YT'} • ${item.date}</span>
-                </div>
+            <li class="history-item" onclick="changePlatform('${item.platform||'youtube'}', 'Link...'); urlInput.value='${item.url}'; processVideo('${item.url}')">
+                <div class="h-info"><h4>${item.title.substring(0, 40)}...</h4><span>${item.platform?item.platform.toUpperCase():'YT'}</span></div>
                 <div class="h-arrow">🔄</div>
             </li>
         `).join('');
     }
-    
     function loadHistory() { renderHistory(); }
-    
-    function clearHistory() {
-        localStorage.removeItem('dl_history');
-        renderHistory();
-    }
-
-    function copyTranscript(type) {
-        const id = type === 'original' ? 'originalTranscript' : 'translatedTranscript';
-        const text = document.getElementById(id).textContent;
-        if(text) navigator.clipboard.writeText(text).then(() => alert("Copiat în clipboard!"));
-    }
-
+    function clearHistory() { localStorage.removeItem('dl_history'); renderHistory(); }
+    function copyTranscript(type) { const t = document.getElementById(type==='original'?'originalTranscript':'translatedTranscript').textContent; if(t) navigator.clipboard.writeText(t).then(()=>alert("Copiat!")); }
     function downloadTxt(type) {
-        const id = type === 'original' ? 'originalTranscript' : 'translatedTranscript';
-        const text = document.getElementById(id).textContent;
-        if(!text) return;
-        const blob = new Blob([text], {type: 'text/plain'});
+        const t = document.getElementById(type==='original'?'originalTranscript':'translatedTranscript').textContent;
+        if(!t) return;
         const a = document.createElement('a');
-        a.href = URL.createObjectURL(blob);
-        a.download = `transcript_${type}.txt`;
-        a.click();
+        a.href = URL.createObjectURL(new Blob([t], {type: 'text/plain'}));
+        a.download = `transcript_${type}.txt`; a.click();
     }
 </script>
 </body>
