@@ -9,8 +9,8 @@ const PORT = 3000;
 
 app.use(cors());
 app.use(express.json());
+// Servim fișierele statice (CSS, JS, Imagini) din folderul public
 app.use(express.static(path.join(__dirname, 'public')));
-app.use(express.static(__dirname));
 
 // --- CONFIGURARE ---
 const RAPIDAPI_KEY = '7efb2ec2c9msh9064cf9c42d6232p172418jsn9da8ae5664d3';
@@ -20,55 +20,55 @@ const openai = new OpenAI({
     apiKey: process.env.OPENAI_API_KEY,
 });
 
-const metadataCache = new Map();
+// Cache ca să fie instant (URL -> Date Video)
+const memoryCache = new Map();
 
-// --- HELPERE ---
-
-// Extrage ID-ul video-ului din orice link YouTube (Normal sau Shorts)
+// --- HELPER: Extragere ID YouTube ---
 function extractVideoId(url) {
-    const match = url.match(/(?:youtu\.be\/|youtube\.com(?:\/embed\/|\/v\/|\/watch\?v=|\/user\/\S+|\/ytscreeningroom\?v=|\/sandalsResorts#\w\/\w\/.*\/))([^\/&]{10,12})/);
+    const regex = /(?:youtube\.com\/(?:[^\/]+\/.+\/|(?:v|e(?:mbed)?)\/|.*[?&]v=)|youtu\.be\/)([^"&?\/\s]{11})/;
+    const match = url.match(regex);
     return match ? match[1] : null;
 }
 
-// Rezumat AI
+// --- HELPER: Rezumat GPT ---
 async function processWithGPT(text) {
-    if (!process.env.OPENAI_API_KEY) return "Fără cheie API setată.";
+    if (!process.env.OPENAI_API_KEY) return "Fără cheie API.";
     try {
         const completion = await openai.chat.completions.create({
             model: "gpt-4o-mini",
             messages: [
-                { role: "system", content: "Ești un asistent care rezumă transcrieri video în limba română. Fii concis." },
-                { role: "user", content: `Rezumă acest text: ${text}` }
+                { role: "system", content: "Ești un traducător expert. Fă un rezumat scurt, structurat cu liniuțe, în limba română." },
+                { role: "user", content: text }
             ],
-            max_tokens: 500,
+            max_tokens: 600,
         });
         return completion.choices[0].message.content;
-    } catch (e) { return "Eroare la generarea rezumatului AI."; }
+    } catch (e) { return "Eroare GPT."; }
 }
 
-// --- RUTE API ---
+// --- 1. PRELOAD DATA (Se apelează automat când pui link-ul) ---
+app.get('/api/resolve', async (req, res) => {
+    const { url } = req.query;
+    if (!url) return res.status(400).json({ error: 'URL lipsă' });
 
-// 1. INFO & TRANSCRIPT
-app.get('/api/info', async (req, res) => {
-    const rawUrl = req.query.url;
-    if (!rawUrl) return res.status(400).json({ error: 'URL lipsă' });
+    console.log(`🔍 Analizez: ${url}`);
 
-    console.log(`🔍 Info Request: ${rawUrl}`);
+    if (memoryCache.has(url)) {
+        console.log('⚡ Din Cache!');
+        return res.json(memoryCache.get(url).info);
+    }
 
-    // Verificăm cache-ul
-    if (metadataCache.has(rawUrl)) return res.json(metadataCache.get(rawUrl));
-
-    const videoId = extractVideoId(rawUrl);
-    if (!videoId) return res.status(400).json({ error: 'Link YouTube invalid' });
+    const videoId = extractVideoId(url);
+    if (!videoId) return res.status(400).json({ error: 'Nu am putut extrage ID-ul video.' });
 
     try {
-        // Apelăm endpoint-ul tău exact cu parametrii din cURL
+        // Apelăm API-ul tău VALID
         const response = await axios.get(`https://${RAPIDAPI_HOST}/youtube/v3/video/details`, {
             params: {
                 videoId: videoId,
-                renderableFormats: '720p,1080p,highres', // Cerem formatele bune
-                urlAccess: 'proxied',
-                getTranscript: 'true' // Cerem și transcriptul direct!
+                renderableFormats: '360p,480p,720p,1080p,highres',
+                urlAccess: 'proxied', // Important pentru link-uri directe
+                getTranscript: 'true'
             },
             headers: {
                 'x-rapidapi-host': RAPIDAPI_HOST,
@@ -77,106 +77,92 @@ app.get('/api/info', async (req, res) => {
         });
 
         const data = response.data;
-
-        // Prelucrăm datele
-        const title = data.title || "Video YouTube";
-        const duration = data.lengthSeconds ? `${Math.floor(data.lengthSeconds / 60)}:${data.lengthSeconds % 60}` : "--:--";
+        const streamingData = data.streamingData || {};
         
-        // Transcript
-        let transcriptData = null;
+        // Procesare Transcript
+        let transcriptObj = null;
         if (data.transcript && data.transcript.content) {
-            const originalText = data.transcript.content; 
-            const summary = await processWithGPT(originalText);
-            transcriptData = { original: originalText, translated: summary };
+            const originalText = data.transcript.content;
+            // Pornim GPT asincron, nu blocăm răspunsul
+            processWithGPT(originalText).then(translated => {
+                // Actualizăm cache-ul când e gata traducerea
+                const cached = memoryCache.get(url);
+                if(cached) cached.info.transcript = { original: originalText, translated: translated };
+            });
+            
+            // Trimitem textul original imediat
+            transcriptObj = { original: originalText, translated: "Se generează traducerea..." };
         }
 
-        const result = {
-            title: title,
-            duration: duration,
-            transcript: transcriptData,
-            // Salvăm datele brute pentru pasul de download ca să nu mai facem request
-            rawFormats: data.streamingData ? data.streamingData : null 
+        // Informațiile de trimis la frontend
+        const info = {
+            title: data.title || "Video fără titlu",
+            duration: data.lengthSeconds ? `${Math.floor(data.lengthSeconds/60)}:${data.lengthSeconds%60}` : "--:--",
+            transcript: transcriptObj,
+            ready: true
         };
 
-        metadataCache.set(rawUrl, result);
-        res.json(result);
+        // Salvăm TOT (Info + Formate) în cache
+        memoryCache.set(url, {
+            info: info,
+            formats: streamingData.formats || [], // Video cu sunet
+            adaptive: streamingData.adaptiveFormats || [] // Video/Audio separat
+        });
+
+        res.json(info);
 
     } catch (error) {
         console.error("❌ API Error:", error.response ? error.response.data : error.message);
-        res.status(500).json({ error: 'Nu am putut obține datele video-ului.' });
+        res.status(500).json({ error: 'Eroare la comunicarea cu RapidAPI.' });
     }
 });
 
-// 2. DOWNLOAD (Folosește datele din Info sau face request nou)
-app.get('/api/convert', async (req, res) => {
-    const { url, type, quality } = req.query; // quality ex: '1080p'
-    const videoId = extractVideoId(url);
+// --- 2. GET TRANSCRIPT (Polling pentru traducere) ---
+app.get('/api/transcript', (req, res) => {
+    const { url } = req.query;
+    if (memoryCache.has(url)) {
+        res.json(memoryCache.get(url).info.transcript);
+    } else {
+        res.json(null);
+    }
+});
+
+// --- 3. DOWNLOAD INSTANT (Din Cache) ---
+app.get('/api/download', (req, res) => {
+    const { url, type, quality } = req.query; // quality: '1080', '720' etc.
     
-    console.log(`🚀 Download Request: ${url} [${type}]`);
+    console.log(`📥 Download req: ${type} ${quality}p`);
 
-    try {
-        let videoData;
+    if (!memoryCache.has(url)) {
+        return res.status(404).send("Link expirat. Te rog dă refresh și analizează din nou.");
+    }
 
-        // Încercăm să luăm datele din cache (ca să nu plătești API call dublu)
-        if (metadataCache.has(url) && metadataCache.get(url).rawFormats) {
-            console.log("⚡ Folosim date din cache.");
-            videoData = metadataCache.get(url).rawFormats;
-        } else {
-            // Dacă nu e în cache, facem request din nou
-            console.log("🔄 Fetching fresh data...");
-            const response = await axios.get(`https://${RAPIDAPI_HOST}/youtube/v3/video/details`, {
-                params: { videoId: videoId, urlAccess: 'proxied', getTranscript: 'false' },
-                headers: { 'x-rapidapi-host': RAPIDAPI_HOST, 'x-rapidapi-key': RAPIDAPI_KEY }
-            });
-            videoData = response.data.streamingData;
-        }
+    const data = memoryCache.get(url);
+    let finalLink = null;
 
-        if (!videoData) return res.status(404).send("Nu am găsit link-uri de download.");
+    if (type === 'audio') {
+        // Căutăm m4a/mp3 în adaptive
+        const audio = data.adaptive.find(f => f.mimeType.includes('audio'));
+        if (audio) finalLink = audio.url;
+    } else {
+        // VIDEO
+        // Încercăm să găsim un fișier complet (Video+Audio) în 'formats'
+        let video = data.formats.find(f => f.qualityLabel && f.qualityLabel.includes(quality));
+        
+        // Dacă nu găsim exact calitatea, luăm cea mai bună disponibilă (de obicei 720p)
+        if (!video) video = data.formats.find(f => f.qualityLabel === '720p');
+        if (!video && data.formats.length > 0) video = data.formats[0];
 
-        let downloadLink = null;
+        if (video) finalLink = video.url;
+    }
 
-        // LOGICA DE EXTRACTION A LINK-ULUI
-        if (type === 'audio') {
-            // Căutăm doar audio (mimeType audio/mp4 sau audio/webm)
-            const formats = [...(videoData.adaptiveFormats || []), ...(videoData.formats || [])];
-            const audio = formats.find(f => f.mimeType.includes('audio'));
-            downloadLink = audio ? audio.url : null;
-        } else {
-            // Căutăm video cu sunet (formats) sau adaptiv
-            // API-ul returnează de obicei link-uri directe în `formats` (muxed) sau `adaptiveFormats`
-            const formats = videoData.formats || []; // Formate cu sunet inclus
-            
-            // Încercăm să găsim calitatea cerută (ex: 1080p)
-            // Notă: Youtube dă 1080p de obicei doar ca video-only (adaptive), 
-            // dar acest API cu 'proxied' s-ar putea să le combine.
-            // Pentru siguranță luăm cel mai bun format cu sunet (720p de obicei).
-            
-            // Căutăm exact calitatea sau cea mai bună disponibilă
-            let bestVideo = formats.find(f => f.qualityLabel && f.qualityLabel.includes(quality)) ||
-                            formats.find(f => f.qualityLabel === '720p') ||
-                            formats[0];
-            
-            if (bestVideo) downloadLink = bestVideo.url;
-            
-            // Dacă tot nu avem link, căutăm în adaptive (poate fi fără sunet, dar e mai bine decât nimic)
-            if (!downloadLink && videoData.adaptiveFormats) {
-                 const bestAdaptive = videoData.adaptiveFormats.find(f => f.qualityLabel && f.qualityLabel.includes(quality));
-                 if(bestAdaptive) downloadLink = bestAdaptive.url;
-            }
-        }
-
-        if (downloadLink) {
-            return res.redirect(downloadLink);
-        } else {
-            res.status(404).send("Nu am putut genera link-ul pentru formatul cerut.");
-        }
-
-    } catch (error) {
-        console.error("❌ Convert Error:", error.message);
-        res.status(500).send("Eroare server.");
+    if (finalLink) {
+        res.redirect(finalLink);
+    } else {
+        res.status(404).send("Formatul cerut nu este disponibil pentru acest video.");
     }
 });
 
 app.listen(PORT, '0.0.0.0', () => {
-    console.log(`🚀 Server FINAL (Endpoint: youtube/v3/video/details) pornit pe portul ${PORT}`);
+    console.log(`🚀 Server PRO pornit pe portul ${PORT}`);
 });
