@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Universal Downloader Pro</title>
+    <title>YouTube Pro Downloader</title>
     <link rel="icon" href="data:,">
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -13,12 +13,11 @@
 <body class="theme-youtube">
 
 <div class="app-wrapper">
-
     <div class="sidebar">
-        <a href="https://creatorsmart.ro" class="nav-item home-logo" title="Back to Dashboard">
-            <img src="logo.png" alt="tLogo" style="width: 82px; height: 82px; object-fit: contain;">
+        <a href="#" class="nav-item home-logo">
+            <img src="logo.png" alt="Logo" style="width: 80px; height: 80px; object-fit: contain;">
         </a>
-        <div class="nav-item active" data-platform="youtube" onclick="changePlatform('youtube', 'Paste YouTube link...')">
+        <div class="nav-item active">
             <svg viewBox="0 0 24 24"><path d="M23.498 6.186a3.016 3.016 0 0 0-2.122-2.136C19.505 3.545 12 3.545 12 3.545s-7.505 0-9.377.505A3.017 3.017 0 0 0 .502 6.186C0 8.07 0 12 0 12s0 3.93.502 5.814a3.016 3.016 0 0 0 2.122 2.136c1.871.505 9.376.505 9.376.505s7.505 0 9.377-.505a3.015 3.015 0 0 0 2.122-2.136C24 15.93 24 12 24 12s0-3.93-.502-5.814zM9.545 15.568V8.432L15.818 12l-6.273 3.568z"/></svg>
         </div>
     </div>
@@ -26,211 +25,144 @@
     <div class="content-area">
         <div class="main-card">
             <div class="header">
-                <h1 id="pageTitle">YouTube Downloader</h1>
-                <p id="pageSubtitle">Next-Gen Downloader & AI Translator</p>
+                <h1>YouTube Pro</h1>
+                <p>Paste Link & Go</p>
             </div>
 
             <div class="input-group">
-                <div class="input-wrapper">
-                    <input type="text" id="urlInput" placeholder="Paste YouTube Link here..." autocomplete="off">
+                <input type="text" id="urlInput" placeholder="Lipește link-ul YouTube aici..." autocomplete="off">
+            </div>
+
+            <div class="download-section" id="downloadSection">
+                <div class="video-meta" id="videoMeta"></div>
+
+                <div class="quality-grid">
+                    <button class="quality-btn" onclick="download('mp4', '360')">360p</button>
+                    <button class="quality-btn" onclick="download('mp4', '720')">720p</button>
+                    <button class="quality-btn active" onclick="download('mp4', '1080')">1080p</button>
+                    <button class="quality-btn audio-btn" onclick="download('mp3', '128')">AUDIO (MP3)</button>
                 </div>
-            </div>
-
-            <div class="format-selector">
-                <button class="format-btn active" data-format="mp4" onclick="selectFormat('mp4')">VIDEO</button>
-                <button class="format-btn" data-format="mp3" onclick="selectFormat('mp3')">AUDIO</button>
-            </div>
-
-            <div class="quality-selector" id="qualitySelector">
-                <button class="quality-btn" onclick="download('360')">360p</button>
-                <button class="quality-btn" onclick="download('480')">480p</button>
-                <button class="quality-btn" onclick="download('720')">720p</button>
-                <button class="quality-btn active" onclick="download('1080')">1080p</button>
-                <button class="quality-btn" onclick="download('highres')">MAX</button>
-            </div>
-
-            <div class="quality-selector" id="audioQualitySelector" style="display: none;">
-                <button class="quality-btn active" onclick="download('128')">DOWNLOAD AUDIO</button>
             </div>
 
             <div class="loading" id="loading">
                 <div class="spinner"></div>
-                <p class="loading-text">Analyzing...</p>
+                <p>Se obțin datele...</p>
             </div>
 
             <div class="error" id="error"></div>
-            <div class="video-info" id="videoInfo"></div>
 
             <div class="transcript-section" id="transcriptSection">
                 <div class="transcript-box">
-                    <h3>Original
-                        <div class="btn-group">
-                            <button class="action-btn txt" onclick="downloadTxt('original')">💾 TXT</button>
-                            <button class="action-btn" onclick="copyTranscript('original')">COPY</button>
-                        </div>
-                    </h3>
-                    <div class="transcript-content" id="originalTranscript"></div>
+                    <h3>Original <button class="copy-btn" onclick="copyText('original')">Copy</button></h3>
+                    <div class="text-content" id="originalText"></div>
                 </div>
                 <div class="transcript-box">
-                    <h3>Romanian AI
-                        <div class="btn-group">
-                            <button class="action-btn txt" onclick="downloadTxt('translated')">💾 TXT</button>
-                            <button class="action-btn" onclick="copyTranscript('translated')">COPY</button>
-                        </div>
-                    </h3>
-                    <div class="transcript-content" id="translatedTranscript"></div>
+                    <h3>Rezumat AI (RO) <button class="copy-btn" onclick="copyText('translated')">Copy</button></h3>
+                    <div class="text-content" id="translatedText"></div>
                 </div>
             </div>
-        </div>
-        <div class="history-section" id="historySection" style="display: none;">
-            <div class="history-header">
-                <h3>📜 Recent Downloads</h3>
-                <button class="clear-btn" onclick="clearHistory()">Clear History</button>
-            </div>
-            <ul class="history-list" id="historyList"></ul>
         </div>
     </div>
 </div>
 
 <script>
-    let currentVideoUrl = '';
+    let currentUrl = '';
     let debounceTimer;
-    let isAnalyzed = false;
+    let isReady = false;
 
     const urlInput = document.getElementById('urlInput');
     const loading = document.getElementById('loading');
     const error = document.getElementById('error');
-    const videoInfo = document.getElementById('videoInfo');
+    const downloadSection = document.getElementById('downloadSection');
+    const videoMeta = document.getElementById('videoMeta');
     const transcriptSection = document.getElementById('transcriptSection');
-    const historySection = document.getElementById('historySection');
-    const historyList = document.getElementById('historyList');
 
-    loadHistory();
-
-    function selectFormat(format) {
-        document.querySelectorAll('.format-btn').forEach(btn => btn.classList.remove('active'));
-        document.querySelector(`[data-format="${format}"]`).classList.add('active');
-        document.getElementById('qualitySelector').style.display = (format === 'mp4') ? 'grid' : 'none';
-        document.getElementById('audioQualitySelector').style.display = (format === 'mp3') ? 'grid' : 'none';
-    }
-
-    // --- 1. LOGICA DE INPUT AUTOMAT ---
+    // 1. AUTO-DETECTIE INPUT
     urlInput.addEventListener('input', () => {
         clearTimeout(debounceTimer);
         const val = urlInput.value.trim();
-        if(val.length === 0) return;
+        if(!val) return;
 
-        // Așteaptă 1 secundă după ce termini de scris
         debounceTimer = setTimeout(() => {
-            if (val.length > 10 && val.includes('youtu')) {
-                analyzeVideo(val);
+            if (val.length > 8 && (val.includes('youtube.com') || val.includes('youtu.be'))) {
+                startAnalysis(val);
             }
-        }, 1000);
+        }, 800);
     });
 
-    // --- 2. ANALIZA VIDEO (Backend call) ---
-    async function analyzeVideo(url) {
-        currentVideoUrl = url;
-        isAnalyzed = false;
+    async function startAnalysis(url) {
+        if(url === currentUrl && isReady) return; // Evită reîncărcarea aceluiași link
 
-        // UI Reset
-        error.classList.remove('show');
-        videoInfo.classList.remove('show');
-        transcriptSection.classList.remove('show');
+        currentUrl = url;
+        isReady = false;
 
-        loading.classList.add('show');
-        loading.querySelector('.loading-text').textContent = "Preiau datele de la RapidAPI...";
+        // Reset UI
+        error.style.display = 'none';
+        downloadSection.style.opacity = '0.5';
+        downloadSection.style.pointerEvents = 'none';
+        transcriptSection.style.display = 'none';
+        loading.style.display = 'block';
 
         try {
-            const response = await fetch(`/api/resolve?url=${encodeURIComponent(url)}`);
-            const data = await response.json();
+            const res = await fetch(`/api/resolve?url=${encodeURIComponent(url)}`);
+            const data = await res.json();
 
             if (data.error) throw new Error(data.error);
 
-            isAnalyzed = true;
+            // Succes
+            isReady = true;
+            videoMeta.innerHTML = `<h3>${data.title}</h3><span>⏱️ ${data.duration}</span>`;
 
-            // Afișare Info
-            videoInfo.innerHTML = `
-                <div style="text-align:center;">
-                    <h3 style="font-size: 1.4rem;">${data.title}</h3>
-                    <p style="color:#aaa;">⏱️ ${data.duration}</p>
-                    <p style="color:#4ade80; margin-top:5px;">✅ Link-uri pregătite!</p>
-                </div>
-            `;
-            videoInfo.classList.add('show');
+            // Activăm butoanele
+            downloadSection.style.opacity = '1';
+            downloadSection.style.pointerEvents = 'all';
 
-            // Afișare Transcript
+            // Transcript
             if (data.transcript) {
-                document.getElementById('originalTranscript').textContent = data.transcript.original;
-                document.getElementById('translatedTranscript').textContent = data.transcript.translated;
-                transcriptSection.classList.add('show');
+                transcriptSection.style.display = 'grid';
+                document.getElementById('originalText').textContent = data.transcript.original;
+                document.getElementById('translatedText').textContent = data.transcript.translated;
 
-                // Dacă traducerea se încarcă încă (poll)
-                if (data.transcript.translated === "Se generează traducerea...") {
-                    pollTranscript(url);
+                if (data.transcript.translated.includes("Se generează")) {
+                    pollTranslation(url);
                 }
             }
 
-            addToHistory(data.title, url);
-
         } catch (err) {
-            console.error(err);
-            error.innerHTML = `❌ Eroare: ${err.message}`;
-            error.classList.add('show');
+            error.textContent = "Eroare: " + err.message;
+            error.style.display = 'block';
         } finally {
-            loading.classList.remove('show');
+            loading.style.display = 'none';
         }
     }
 
-    // --- 3. DOWNLOAD INSTANT ---
-    function download(quality) {
-        if (!isAnalyzed) {
-            alert("Așteaptă să se termine analiza video-ului!");
+    function download(type, quality) {
+        if (!isReady) {
+            alert("Așteaptă analiza!");
             return;
         }
-
-        const type = document.querySelector('.format-btn.active').dataset.format === 'mp4' ? 'video' : 'audio';
-
-        // Redirect direct către backend care are link-ul în cache
-        window.location.href = `/api/download?url=${encodeURIComponent(currentVideoUrl)}&type=${type}&quality=${quality}`;
+        const formatType = type === 'mp3' ? 'audio' : 'video';
+        // Redirect direct pentru download instant
+        window.location.href = `/api/download?url=${encodeURIComponent(currentUrl)}&type=${formatType}&quality=${quality}`;
     }
 
-    // --- 4. Verificare Traducere (Polling) ---
-    async function pollTranscript(url) {
-        let attempts = 0;
+    async function pollTranslation(url) {
+        let checks = 0;
         const interval = setInterval(async () => {
-            if (attempts > 20) clearInterval(interval);
+            if (checks > 15) clearInterval(interval);
             const res = await fetch(`/api/transcript?url=${encodeURIComponent(url)}`);
             const data = await res.json();
-            if (data && data.translated && data.translated !== "Se generează traducerea...") {
-                document.getElementById('translatedTranscript').textContent = data.translated;
+            if (data && data.translated && !data.translated.includes("Se generează")) {
+                document.getElementById('translatedText').textContent = data.translated;
                 clearInterval(interval);
             }
-            attempts++;
+            checks++;
         }, 2000);
     }
 
-    // --- Helpers (History, Copy, etc) ---
-    function changePlatform(p, ph) { urlInput.value=''; urlInput.placeholder=ph; document.body.className=`theme-${p}`; }
-    function addToHistory(t, u) {
-        let h = JSON.parse(localStorage.getItem('dl_history')||'[]');
-        h=h.filter(x=>x.u!==u); h.unshift({t,u,d:new Date().toLocaleTimeString()});
-        if(h.length>5)h.pop(); localStorage.setItem('dl_history',JSON.stringify(h)); renderHistory();
-    }
-    function renderHistory(){
-        let h = JSON.parse(localStorage.getItem('dl_history')||'[]');
-        historySection.style.display = h.length?'block':'none';
-        historyList.innerHTML = h.map(i=>`<li class="history-item" onclick="urlInput.value='${i.u}';analyzeVideo('${i.u}')"><div class="h-info"><h4>${i.t.substring(0,30)}...</h4><span>${i.d}</span></div><div class="h-arrow">🔄</div></li>`).join('');
-    }
-    function clearHistory(){localStorage.removeItem('dl_history');renderHistory();}
-    function downloadTxt(type){
-        const t=document.getElementById(type==='original'?'originalTranscript':'translatedTranscript').textContent;
-        if(!t)return;
-        const a=document.createElement('a'); a.href=URL.createObjectURL(new Blob([t],{type:'text/plain'})); a.download=`transcript.txt`; a.click();
-    }
-    function copyTranscript(type){
-        const t=document.getElementById(type==='original'?'originalTranscript':'translatedTranscript').textContent;
-        if(t)navigator.clipboard.writeText(t).then(()=>alert("Copiat!"));
+    function copyText(id) {
+        const t = document.getElementById(id === 'original' ? 'originalText' : 'translatedText').textContent;
+        navigator.clipboard.writeText(t);
     }
 </script>
 </body>
