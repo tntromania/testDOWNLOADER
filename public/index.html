@@ -3,100 +3,584 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>YT Downloader Fix</title>
-    <link rel="stylesheet" href="style.css">
+    <title>YouTube Downloader</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, sans-serif;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            min-height: 100vh;
+            padding: 20px;
+        }
+
+        .container {
+            max-width: 900px;
+            margin: 0 auto;
+        }
+
+        .header {
+            text-align: center;
+            color: white;
+            margin-bottom: 40px;
+        }
+
+        .header h1 {
+            font-size: 2.5em;
+            margin-bottom: 10px;
+            text-shadow: 2px 2px 4px rgba(0,0,0,0.2);
+        }
+
+        .header p {
+            opacity: 0.9;
+            font-size: 1.1em;
+        }
+
+        .card {
+            background: white;
+            border-radius: 15px;
+            padding: 30px;
+            box-shadow: 0 20px 60px rgba(0,0,0,0.3);
+            margin-bottom: 20px;
+        }
+
+        .input-group {
+            display: flex;
+            gap: 10px;
+            margin-bottom: 20px;
+        }
+
+        input[type="text"] {
+            flex: 1;
+            padding: 15px;
+            border: 2px solid #e0e0e0;
+            border-radius: 10px;
+            font-size: 16px;
+            transition: border-color 0.3s;
+        }
+
+        input[type="text"]:focus {
+            outline: none;
+            border-color: #667eea;
+        }
+
+        button {
+            padding: 15px 30px;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+            border: none;
+            border-radius: 10px;
+            font-size: 16px;
+            font-weight: 600;
+            cursor: pointer;
+            transition: transform 0.2s, box-shadow 0.2s;
+        }
+
+        button:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 5px 15px rgba(102, 126, 234, 0.4);
+        }
+
+        button:active {
+            transform: translateY(0);
+        }
+
+        button:disabled {
+            opacity: 0.6;
+            cursor: not-allowed;
+            transform: none;
+        }
+
+        .tabs {
+            display: flex;
+            gap: 10px;
+            margin-bottom: 20px;
+            border-bottom: 2px solid #e0e0e0;
+        }
+
+        .tab {
+            padding: 12px 24px;
+            background: none;
+            border: none;
+            border-radius: 8px 8px 0 0;
+            cursor: pointer;
+            font-size: 14px;
+            font-weight: 600;
+            color: #666;
+            transition: all 0.3s;
+        }
+
+        .tab.active {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+        }
+
+        .tab-content {
+            display: none;
+        }
+
+        .tab-content.active {
+            display: block;
+        }
+
+        .video-info {
+            margin-top: 20px;
+        }
+
+        .video-preview {
+            display: flex;
+            gap: 20px;
+            margin-bottom: 20px;
+            padding: 15px;
+            background: #f8f9fa;
+            border-radius: 10px;
+        }
+
+        .video-preview img {
+            width: 200px;
+            border-radius: 8px;
+        }
+
+        .video-details h3 {
+            color: #333;
+            margin-bottom: 10px;
+        }
+
+        .video-details p {
+            color: #666;
+            margin-bottom: 5px;
+            font-size: 14px;
+        }
+
+        .downloads {
+            margin-top: 20px;
+        }
+
+        .download-item {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            padding: 15px;
+            background: #f8f9fa;
+            border-radius: 8px;
+            margin-bottom: 10px;
+        }
+
+        .download-info {
+            flex: 1;
+        }
+
+        .download-info .quality {
+            font-weight: 600;
+            color: #333;
+            margin-bottom: 5px;
+        }
+
+        .download-info .size {
+            font-size: 14px;
+            color: #666;
+        }
+
+        .download-btn {
+            padding: 10px 20px;
+            font-size: 14px;
+        }
+
+        .search-results {
+            margin-top: 20px;
+        }
+
+        .search-item {
+            display: flex;
+            gap: 15px;
+            padding: 15px;
+            background: #f8f9fa;
+            border-radius: 10px;
+            margin-bottom: 15px;
+            cursor: pointer;
+            transition: transform 0.2s, box-shadow 0.2s;
+        }
+
+        .search-item:hover {
+            transform: translateX(5px);
+            box-shadow: 0 5px 15px rgba(0,0,0,0.1);
+        }
+
+        .search-item img {
+            width: 160px;
+            height: 90px;
+            object-fit: cover;
+            border-radius: 8px;
+        }
+
+        .search-item-details {
+            flex: 1;
+        }
+
+        .search-item-details h4 {
+            color: #333;
+            margin-bottom: 8px;
+        }
+
+        .search-item-details p {
+            color: #666;
+            font-size: 14px;
+        }
+
+        .loading {
+            text-align: center;
+            padding: 40px;
+            color: #666;
+        }
+
+        .spinner {
+            border: 3px solid #f3f3f3;
+            border-top: 3px solid #667eea;
+            border-radius: 50%;
+            width: 40px;
+            height: 40px;
+            animation: spin 1s linear infinite;
+            margin: 0 auto 20px;
+        }
+
+        @keyframes spin {
+            0% { transform: rotate(0deg); }
+            100% { transform: rotate(360deg); }
+        }
+
+        .error {
+            background: #fee;
+            color: #c33;
+            padding: 15px;
+            border-radius: 8px;
+            margin-top: 20px;
+            border-left: 4px solid #c33;
+        }
+
+        .success {
+            background: #efe;
+            color: #3c3;
+            padding: 15px;
+            border-radius: 8px;
+            margin-top: 20px;
+            border-left: 4px solid #3c3;
+        }
+
+        @media (max-width: 768px) {
+            .header h1 {
+                font-size: 2em;
+            }
+
+            .video-preview {
+                flex-direction: column;
+            }
+
+            .video-preview img {
+                width: 100%;
+            }
+
+            .search-item {
+                flex-direction: column;
+            }
+
+            .search-item img {
+                width: 100%;
+            }
+        }
+    </style>
 </head>
 <body>
-
 <div class="container">
+    <div class="header">
+        <h1>🎥 YouTube Downloader</h1>
+        <p>Descarcă videoclipuri și shorts de pe YouTube</p>
+    </div>
+
     <div class="card">
-        <h1>YouTube & Shorts 🚀</h1>
-
-        <div class="input-area">
-            <input type="text" id="url" placeholder="Lipește link-ul aici (Ex: youtube.com/shorts/...)" autocomplete="off">
+        <div class="tabs">
+            <button class="tab active" onclick="switchTab('download')">Download</button>
+            <button class="tab" onclick="switchTab('search')">Căutare</button>
+            <button class="tab" onclick="switchTab('trending')">Trending</button>
         </div>
 
-        <div class="loader" id="loader">
-            ⏳ Analizez... (Durează 2-3 secunde)
+        <!-- Tab Download -->
+        <div id="download-tab" class="tab-content active">
+            <div class="input-group">
+                <input type="text" id="videoUrl" placeholder="Introdu URL-ul YouTube sau ID-ul video">
+                <button onclick="getVideoInfo()">Obține Info</button>
+            </div>
+            <div id="downloadResult"></div>
         </div>
 
-        <div class="results" id="results">
-            <div class="video-header">
-                <h2 id="vidTitle"></h2>
+        <!-- Tab Search -->
+        <div id="search-tab" class="tab-content">
+            <div class="input-group">
+                <input type="text" id="searchQuery" placeholder="Caută videoclipuri...">
+                <button onclick="searchVideos()">Caută</button>
             </div>
+            <div id="searchResult"></div>
+        </div>
 
-            <div class="btn-grid" id="btnGrid">
+        <!-- Tab Trending -->
+        <div id="trending-tab" class="tab-content">
+            <div style="display: flex; gap: 10px; margin-bottom: 20px;">
+                <button onclick="getTrending('now')">Trending Acum</button>
+                <button onclick="getTrending('music')">Muzică</button>
+                <button onclick="getTrending('gaming')">Gaming</button>
+                <button onclick="getTrending('movies')">Filme</button>
             </div>
-
-            <div class="text-grid">
-                <div class="text-box">
-                    <h3>🇷🇴 REZUMAT AI</h3>
-                    <div class="content" id="translatedText"></div>
-                </div>
-                <div class="text-box">
-                    <h3>🇺🇸 TRANSCRIPT</h3>
-                    <div class="content" id="originalText"></div>
-                </div>
-            </div>
+            <div id="trendingResult"></div>
         </div>
     </div>
 </div>
 
 <script>
-    const urlInput = document.getElementById('url');
-    const loader = document.getElementById('loader');
-    const results = document.getElementById('results');
-    let debounceTimer;
+    function switchTab(tabName) {
+        // Ascunde toate tab-urile
+        document.querySelectorAll('.tab-content').forEach(tab => {
+            tab.classList.remove('active');
+        });
+        document.querySelectorAll('.tab').forEach(tab => {
+            tab.classList.remove('active');
+        });
 
-    urlInput.addEventListener('input', () => {
-        clearTimeout(debounceTimer);
-        const val = urlInput.value.trim();
-        if (val.length > 5) {
-            debounceTimer = setTimeout(() => {
-                startProcess(val);
-            }, 800);
+        // Afișează tab-ul selectat
+        document.getElementById(`${tabName}-tab`).classList.add('active');
+        event.target.classList.add('active');
+    }
+
+    function extractVideoId(input) {
+        // Dacă e deja un ID
+        if (input.length === 11 && !input.includes('/')) {
+            return input;
         }
-    });
 
-    async function startProcess(url) {
-        loader.style.display = 'block';
-        results.style.display = 'none';
-        document.getElementById('btnGrid').innerHTML = '';
+        // Extrage ID din URL
+        const patterns = [
+            /(?:youtube\.com\/watch\?v=|youtu\.be\/)([a-zA-Z0-9_-]{11})/,
+            /youtube\.com\/shorts\/([a-zA-Z0-9_-]{11})/
+        ];
+
+        for (const pattern of patterns) {
+            const match = input.match(pattern);
+            if (match) return match[1];
+        }
+
+        return input;
+    }
+
+    async function getVideoInfo() {
+        const input = document.getElementById('videoUrl').value.trim();
+        const resultDiv = document.getElementById('downloadResult');
+
+        if (!input) {
+            resultDiv.innerHTML = '<div class="error">Te rog introdu un URL sau ID valid!</div>';
+            return;
+        }
+
+        const videoId = extractVideoId(input);
+        resultDiv.innerHTML = '<div class="loading"><div class="spinner"></div>Se încarcă...</div>';
 
         try {
-            const res = await fetch(`/api/process?url=${encodeURIComponent(url)}`);
-            const data = await res.json();
+            const response = await fetch(`/api/video-info?id=${videoId}`);
+            const data = await response.json();
 
-            if (data.error) throw new Error(data.error);
-
-            // 1. Titlu
-            document.getElementById('vidTitle').innerText = data.title;
-
-            // 2. Butoane
-            if (data.downloads && data.downloads.length > 0) {
-                data.downloads.forEach(d => {
-                    const a = document.createElement('a');
-                    a.href = d.url;
-                    a.className = `dl-btn ${d.type}`;
-                    a.target = '_blank';
-                    a.innerHTML = `DESCARCĂ ${d.label}`;
-                    document.getElementById('btnGrid').appendChild(a);
-                });
-            } else {
-                document.getElementById('btnGrid').innerHTML = '<p style="color:orange">API-ul nu a găsit link-uri directe de download pentru acest video.</p>';
+            if (data.status === 'error' || !data.data) {
+                throw new Error(data.message || 'Eroare la obținerea datelor');
             }
 
-            // 3. Texte
-            document.getElementById('translatedText').textContent = data.transcript.translated;
-            document.getElementById('originalText').textContent = data.transcript.original;
-
-            results.style.display = 'block';
-
-        } catch (e) {
-            alert("Eroare: " + e.message);
-        } finally {
-            loader.style.display = 'none';
+            const video = data.data;
+            displayVideoInfo(video, videoId);
+        } catch (error) {
+            resultDiv.innerHTML = `<div class="error">Eroare: ${error.message}</div>`;
         }
+    }
+
+    async function displayVideoInfo(video, videoId) {
+        const resultDiv = document.getElementById('downloadResult');
+
+        const html = `
+                <div class="video-preview">
+                    <img src="${video.thumbnail || video.thumbnails?.[0]?.url}" alt="Thumbnail">
+                    <div class="video-details">
+                        <h3>${video.title}</h3>
+                        <p><strong>Canal:</strong> ${video.channelTitle || video.author || 'N/A'}</p>
+                        <p><strong>Durată:</strong> ${video.lengthText || 'N/A'}</p>
+                        <p><strong>Vizualizări:</strong> ${video.viewCount || 'N/A'}</p>
+                    </div>
+                </div>
+                <button onclick="getDownloadLinks('${videoId}')">Obține Link-uri Download</button>
+                <div id="downloadLinks"></div>
+            `;
+
+        resultDiv.innerHTML = html;
+    }
+
+    async function getDownloadLinks(videoId) {
+        const linksDiv = document.getElementById('downloadLinks');
+        linksDiv.innerHTML = '<div class="loading"><div class="spinner"></div>Se obțin link-urile...</div>';
+
+        try {
+            const response = await fetch(`/api/download?id=${videoId}`);
+            const data = await response.json();
+
+            if (data.status === 'error' || !data.data) {
+                throw new Error(data.message || 'Eroare la obținerea link-urilor');
+            }
+
+            displayDownloadLinks(data.data);
+        } catch (error) {
+            linksDiv.innerHTML = `<div class="error">Eroare: ${error.message}</div>`;
+        }
+    }
+
+    function displayDownloadLinks(data) {
+        const linksDiv = document.getElementById('downloadLinks');
+        const formats = data.formats || data.downloadLinks || [];
+
+        if (!formats.length) {
+            linksDiv.innerHTML = '<div class="error">Nu s-au găsit formate disponibile</div>';
+            return;
+        }
+
+        let html = '<div class="downloads"><h3>Formate Disponibile:</h3>';
+
+        formats.forEach(format => {
+            const quality = format.qualityLabel || format.quality || 'Unknown';
+            const size = format.contentLength ? `${(format.contentLength / 1024 / 1024).toFixed(2)} MB` : 'N/A';
+            const type = format.mimeType?.split(';')[0] || 'video/mp4';
+
+            html += `
+                    <div class="download-item">
+                        <div class="download-info">
+                            <div class="quality">${quality} - ${type}</div>
+                            <div class="size">Dimensiune: ${size}</div>
+                        </div>
+                        <a href="${format.url}" target="_blank">
+                            <button class="download-btn">⬇ Download</button>
+                        </a>
+                    </div>
+                `;
+        });
+
+        html += '</div>';
+        linksDiv.innerHTML = html;
+    }
+
+    async function searchVideos() {
+        const query = document.getElementById('searchQuery').value.trim();
+        const resultDiv = document.getElementById('searchResult');
+
+        if (!query) {
+            resultDiv.innerHTML = '<div class="error">Introdu un termen de căutare!</div>';
+            return;
+        }
+
+        resultDiv.innerHTML = '<div class="loading"><div class="spinner"></div>Se caută...</div>';
+
+        try {
+            const response = await fetch(`/api/search?query=${encodeURIComponent(query)}`);
+            const data = await response.json();
+
+            if (data.status === 'error' || !data.data) {
+                throw new Error(data.message || 'Eroare la căutare');
+            }
+
+            displaySearchResults(data.data);
+        } catch (error) {
+            resultDiv.innerHTML = `<div class="error">Eroare: ${error.message}</div>`;
+        }
+    }
+
+    function displaySearchResults(data) {
+        const resultDiv = document.getElementById('searchResult');
+        const videos = data.contents || data.results || [];
+
+        if (!videos.length) {
+            resultDiv.innerHTML = '<div class="error">Nu s-au găsit rezultate</div>';
+            return;
+        }
+
+        let html = '<div class="search-results">';
+
+        videos.forEach(item => {
+            const video = item.video || item;
+            if (!video.videoId) return;
+
+            html += `
+                    <div class="search-item" onclick="selectVideo('${video.videoId}')">
+                        <img src="${video.thumbnails?.[0]?.url || ''}" alt="Thumbnail">
+                        <div class="search-item-details">
+                            <h4>${video.title}</h4>
+                            <p>${video.channelTitle || video.author || 'N/A'}</p>
+                            <p>${video.viewCountText || video.viewCount || ''} • ${video.publishedTimeText || ''}</p>
+                        </div>
+                    </div>
+                `;
+        });
+
+        html += '</div>';
+        resultDiv.innerHTML = html;
+    }
+
+    function selectVideo(videoId) {
+        switchTab('download');
+        document.querySelector('.tab').click();
+        document.getElementById('videoUrl').value = videoId;
+        getVideoInfo();
+    }
+
+    async function getTrending(type) {
+        const resultDiv = document.getElementById('trendingResult');
+        resultDiv.innerHTML = '<div class="loading"><div class="spinner"></div>Se încarcă...</div>';
+
+        try {
+            const response = await fetch(`/api/trending?type=${type}`);
+            const data = await response.json();
+
+            if (data.status === 'error' || !data.data) {
+                throw new Error(data.message || 'Eroare la obținerea datelor');
+            }
+
+            displaySearchResults(data.data);
+        } catch (error) {
+            resultDiv.innerHTML = `<div class="error">Eroare: ${error.message}</div>`;
+        }
+    }
+
+    function displaySearchResults(data) {
+        const resultDiv = document.getElementById('trendingResult') || document.getElementById('searchResult');
+        const videos = data.contents || data.results || [];
+
+        if (!videos.length) {
+            resultDiv.innerHTML = '<div class="error">Nu s-au găsit rezultate</div>';
+            return;
+        }
+
+        let html = '<div class="search-results">';
+
+        videos.forEach(item => {
+            const video = item.video || item;
+            if (!video.videoId) return;
+
+            html += `
+                    <div class="search-item" onclick="selectVideo('${video.videoId}')">
+                        <img src="${video.thumbnails?.[0]?.url || ''}" alt="Thumbnail">
+                        <div class="search-item-details">
+                            <h4>${video.title}</h4>
+                            <p>${video.channelTitle || video.author || 'N/A'}</p>
+                            <p>${video.viewCountText || video.viewCount || ''} • ${video.publishedTimeText || ''}</p>
+                        </div>
+                    </div>
+                `;
+        });
+
+        html += '</div>';
+        resultDiv.innerHTML = html;
     }
 </script>
 </body>
