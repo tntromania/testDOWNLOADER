@@ -3,166 +3,74 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>YouTube Pro Downloader</title>
-    <link rel="icon" href="data:,">
-    <link rel="preconnect" href="https://fonts.googleapis.com">
-    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-    <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;500;700;800&display=swap" rel="stylesheet">
-    <link rel="stylesheet" href="style.css">
+    <title>AI Video Tools</title>
+    <style>
+        body { font-family: sans-serif; background: #111; color: #fff; display: flex; flex-direction: column; align-items: center; padding: 50px; }
+        input { padding: 15px; width: 300px; border-radius: 5px; border: none; }
+        button { padding: 15px 30px; background: #007bff; color: white; border: none; border-radius: 5px; cursor: pointer; margin-left: 10px; }
+        button:hover { background: #0056b3; }
+        .container { max-width: 800px; width: 100%; margin-top: 30px; }
+        .box { background: #222; padding: 20px; margin-bottom: 20px; border-radius: 10px; border: 1px solid #333; }
+        h3 { margin-top: 0; color: #007bff; }
+        pre { white-space: pre-wrap; color: #ccc; }
+        .loader { display: none; color: yellow; margin-top: 20px; }
+    </style>
 </head>
-<body class="theme-youtube">
+<body>
 
-<div class="app-wrapper">
-    <div class="sidebar">
-        <a href="#" class="nav-item home-logo">
-            <img src="logo.png" alt="Logo" style="width: 80px; height: 80px; object-fit: contain;">
-        </a>
-        <div class="nav-item active">
-            <svg viewBox="0 0 24 24"><path d="M23.498 6.186a3.016 3.016 0 0 0-2.122-2.136C19.505 3.545 12 3.545 12 3.545s-7.505 0-9.377.505A3.017 3.017 0 0 0 .502 6.186C0 8.07 0 12 0 12s0 3.93.502 5.814a3.016 3.016 0 0 0 2.122 2.136c1.871.505 9.376.505 9.376.505s7.505 0 9.377-.505a3.015 3.015 0 0 0 2.122-2.136C24 15.93 24 12 24 12s0-3.93-.502-5.814zM9.545 15.568V8.432L15.818 12l-6.273 3.568z"/></svg>
-        </div>
+<h1>YouTube AI Downloader & Translator</h1>
+<div>
+    <input type="text" id="urlInput" placeholder="Pune link-ul YouTube aici...">
+    <button onclick="process()">PROCESEAZĂ</button>
+</div>
+
+<div class="loader" id="loader">⏳ Se analizează video-ul, se descarcă și se traduce... (Așteaptă 10-20 sec)</div>
+
+<div class="container" id="results" style="display: none;">
+    <div class="box">
+        <h3>🎥 Video Info</h3>
+        <h4 id="vidTitle"></h4>
+        <a id="dwnBtn" href="#" target="_blank" style="color: #0f0; font-weight: bold;">[ DESCARCĂ VIDEO ]</a>
     </div>
 
-    <div class="content-area">
-        <div class="main-card">
-            <div class="header">
-                <h1>YouTube Pro</h1>
-                <p>Paste Link & Go</p>
-            </div>
+    <div class="box">
+        <h3>🇷🇴 Traducere AI (GPT-4o-mini)</h3>
+        <pre id="transText"></pre>
+    </div>
 
-            <div class="input-group">
-                <input type="text" id="urlInput" placeholder="Lipește link-ul YouTube aici..." autocomplete="off">
-            </div>
-
-            <div class="download-section" id="downloadSection">
-                <div class="video-meta" id="videoMeta"></div>
-
-                <div class="quality-grid">
-                    <button class="quality-btn" onclick="download('mp4', '360')">360p</button>
-                    <button class="quality-btn" onclick="download('mp4', '720')">720p</button>
-                    <button class="quality-btn active" onclick="download('mp4', '1080')">1080p</button>
-                    <button class="quality-btn audio-btn" onclick="download('mp3', '128')">AUDIO (MP3)</button>
-                </div>
-            </div>
-
-            <div class="loading" id="loading">
-                <div class="spinner"></div>
-                <p>Se obțin datele...</p>
-            </div>
-
-            <div class="error" id="error"></div>
-
-            <div class="transcript-section" id="transcriptSection">
-                <div class="transcript-box">
-                    <h3>Original <button class="copy-btn" onclick="copyText('original')">Copy</button></h3>
-                    <div class="text-content" id="originalText"></div>
-                </div>
-                <div class="transcript-box">
-                    <h3>Rezumat AI (RO) <button class="copy-btn" onclick="copyText('translated')">Copy</button></h3>
-                    <div class="text-content" id="translatedText"></div>
-                </div>
-            </div>
-        </div>
+    <div class="box">
+        <h3>🇬🇧 Transcript Original</h3>
+        <pre id="origText"></pre>
     </div>
 </div>
 
 <script>
-    let currentUrl = '';
-    let debounceTimer;
-    let isReady = false;
+    async function process() {
+        const url = document.getElementById('urlInput').value;
+        if(!url) return alert('Bagă un link!');
 
-    const urlInput = document.getElementById('urlInput');
-    const loading = document.getElementById('loading');
-    const error = document.getElementById('error');
-    const downloadSection = document.getElementById('downloadSection');
-    const videoMeta = document.getElementById('videoMeta');
-    const transcriptSection = document.getElementById('transcriptSection');
-
-    // 1. AUTO-DETECTIE INPUT
-    urlInput.addEventListener('input', () => {
-        clearTimeout(debounceTimer);
-        const val = urlInput.value.trim();
-        if(!val) return;
-
-        debounceTimer = setTimeout(() => {
-            if (val.length > 8 && (val.includes('youtube.com') || val.includes('youtu.be'))) {
-                startAnalysis(val);
-            }
-        }, 800);
-    });
-
-    async function startAnalysis(url) {
-        if(url === currentUrl && isReady) return; // Evită reîncărcarea aceluiași link
-
-        currentUrl = url;
-        isReady = false;
-
-        // Reset UI
-        error.style.display = 'none';
-        downloadSection.style.opacity = '0.5';
-        downloadSection.style.pointerEvents = 'none';
-        transcriptSection.style.display = 'none';
-        loading.style.display = 'block';
+        document.getElementById('loader').style.display = 'block';
+        document.getElementById('results').style.display = 'none';
 
         try {
-            const res = await fetch(`/api/resolve?url=${encodeURIComponent(url)}`);
+            const res = await fetch(`/api/process?url=${encodeURIComponent(url)}`);
             const data = await res.json();
 
-            if (data.error) throw new Error(data.error);
+            if(data.error) {
+                alert('Eroare: ' + data.error);
+            } else {
+                document.getElementById('vidTitle').innerText = data.title;
+                document.getElementById('dwnBtn').href = data.downloadUrl;
+                document.getElementById('origText').innerText = data.originalText;
+                document.getElementById('transText').innerText = data.translatedText;
 
-            // Succes
-            isReady = true;
-            videoMeta.innerHTML = `<h3>${data.title}</h3><span>⏱️ ${data.duration}</span>`;
-
-            // Activăm butoanele
-            downloadSection.style.opacity = '1';
-            downloadSection.style.pointerEvents = 'all';
-
-            // Transcript
-            if (data.transcript) {
-                transcriptSection.style.display = 'grid';
-                document.getElementById('originalText').textContent = data.transcript.original;
-                document.getElementById('translatedText').textContent = data.transcript.translated;
-
-                if (data.transcript.translated.includes("Se generează")) {
-                    pollTranslation(url);
-                }
+                document.getElementById('results').style.display = 'block';
             }
-
-        } catch (err) {
-            error.textContent = "Eroare: " + err.message;
-            error.style.display = 'block';
+        } catch (e) {
+            alert('Eroare rețea.');
         } finally {
-            loading.style.display = 'none';
+            document.getElementById('loader').style.display = 'none';
         }
-    }
-
-    function download(type, quality) {
-        if (!isReady) {
-            alert("Așteaptă analiza!");
-            return;
-        }
-        const formatType = type === 'mp3' ? 'audio' : 'video';
-        // Redirect direct pentru download instant
-        window.location.href = `/api/download?url=${encodeURIComponent(currentUrl)}&type=${formatType}&quality=${quality}`;
-    }
-
-    async function pollTranslation(url) {
-        let checks = 0;
-        const interval = setInterval(async () => {
-            if (checks > 15) clearInterval(interval);
-            const res = await fetch(`/api/transcript?url=${encodeURIComponent(url)}`);
-            const data = await res.json();
-            if (data && data.translated && !data.translated.includes("Se generează")) {
-                document.getElementById('translatedText').textContent = data.translated;
-                clearInterval(interval);
-            }
-            checks++;
-        }, 2000);
-    }
-
-    function copyText(id) {
-        const t = document.getElementById(id === 'original' ? 'originalText' : 'translatedText').textContent;
-        navigator.clipboard.writeText(t);
     }
 </script>
 </body>
