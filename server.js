@@ -1,168 +1,108 @@
-import express from 'express';
-import axios from 'axios';
-import cors from 'cors';
-import path from 'path';
-import { fileURLToPath } from 'url';
+import express from "express";
+import cors from "cors";
+import { exec } from "child_process";
+import { createReadStream } from "fs";
+import { pipeline } from "stream";
+import { getTranscript } from "youtube-transcript";
 
 const app = express();
-const __filename = fileURLToPath(import.meta.url);
-const __dirname = path.dirname(__filename);
-
-// Middleware
-app.use(cors());
 app.use(express.json());
-app.use(express.static('public'));
+app.use(cors());
 
-// Env variables are now directly fetched from the system (provided by Coolify)
-const RAPIDAPI_KEY = process.env.RAPIDAPI_KEY;
-const RAPIDAPI_HOST = 'youtube-video-and-shorts-downloader.p.rapidapi.com';
-const OPENAI_API_KEY = process.env.OPENAI_API_KEY;
+// Descărcare instant + transcript
+app.post("/api/download", async (req, res) => {
+  const { url } = req.body;
 
-// Download video și obține transcript
-app.post('/api/download', async (req, res) => {
+  if (!url) {
+    return res.status(400).json({ error: "URL YouTube este obligatoriu!" });
+  }
+
   try {
-    const { url } = req.body;
-
-    if (!url) {
-      return res.status(400).json({ error: 'YouTube URL este obligatoriu' });
-    }
-
-    // Extrage video ID
-    const videoId = extractVideoId(url);
+    // Validează URL și obține video ID
+    const videoId = url.split("v=")[1]?.split("&")[0] || url.split("/").pop();
     if (!videoId) {
-      return res.status(400).json({ error: 'URL YouTube invalid' });
+      return res.status(400).json({ error: "URL YouTube invalid." });
     }
 
     console.log(`Processing video: ${videoId}`);
 
-    // Apelează RapidAPI pentru download info
-    const downloadResponse = await axios.get(
-      'https://youtube-video-and-shorts-downloader.p.rapidapi.com/download',
-      {
-        params: {
-          url: url,
-        },
-        headers: {
-          'x-rapidapi-key': RAPIDAPI_KEY,
-          'x-rapidapi-host': RAPIDAPI_HOST,
-        },
-      }
-    );
+    // Generează comanda yt-dlp pentru descărcare directă (stream prin STDOUT)
+    const command = `yt-dlp -o - -f best ${url}`;
+    console.log(`Executing command: ${command}`);
 
-    const downloadData = downloadResponse.data;
+    // Pornire transmisie video directă
+    const stream = exec(command, { maxBuffer: 1024 * 1024 * 100 });
+    res.writeHead(200, {
+      "Content-Disposition": `attachment; filename="video.mp4"`,
+      "Content-Type": "video/mp4",
+    });
+
+    stream.stdout.pipe(res); // Conectează stream-ul direct la răspunsul HTTP
+    stream.stderr.on("data", (data) => console.error(data.toString()));
+    stream.on("close", () => console.log("Download complete"));
 
     // Obține transcript
-    let transcript = '';
-    let translatedTranscript = '';
+    let transcript = [];
     try {
       transcript = await getTranscript(videoId);
-      if (transcript) {
-        translatedTranscript = await translateWithGPT4(transcript);
-      }
-    } catch (transcriptError) {
-      console.log('Transcript not available:', transcriptError.message);
+    } catch (err) {
+      console.log("Transcript indisponibil:", err.message);
     }
 
-    res.json({
-      success: true,
-      download: downloadData,
-      transcript: transcript,
-      translatedTranscript: translatedTranscript,
-      videoId: videoId,
+    // Traduce transcript cu GPT
+    let translatedTranscript = "";
+    if (transcript && transcript.length > 0) {
+      translatedTranscript = await translateWithGPT(
+        transcript.map((t) => t.text).join("\n")
+      );
+    }
+
+    // Adaugă transcriptul tradus în răspuns sub formă de JSON metadata
+    res.addTrailers({
+      "x-transcript-original": JSON.stringify(transcript),
+      "x-transcript-translated": translatedTranscript || "Fără traducere",
     });
   } catch (error) {
-    console.error('Error:', error.message);
-    res.status(500).json({
-      error: error.message || 'Eroare la procesare',
-      details: error.response?.data || null,
-    });
+    console.error("Server error:", error.message);
+    res.status(500).json({ error: "Eroare la procesare." });
   }
 });
 
-// Funcție pentru extragere video ID
-function extractVideoId(url) {
-  const regexes = [
-    /(?:youtube\.com\/watch\?v=|youtu\.be\/)([^&\n?#]+)/,
-    /youtube\.com\/shorts\/([^?&\n]+)/,
-  ];
-
-  for (const regex of regexes) {
-    const match = url.match(regex);
-    if (match) return match[1];
-  }
-  return null;
-}
-
-// Obține transcript de pe YouTube
-async function getTranscript(videoId) {
+// Funcție pentru traducerea cu GPT
+async function translateWithGPT(text) {
   try {
-    const response = await axios.get(
-      'https://www.youtube.com/youtubei/v1/get_transcript',
-      {
-        params: {
-          videoId: videoId,
-        },
-        headers: {
-          'Content-Type': 'application/json',
-        },
-      }
-    );
-
-    if (response.data?.responseContext) {
-      // Parse transcript
-      const transcriptData = response.data.responseContext;
-      return JSON.stringify(transcriptData);
-    }
-    return '';
-  } catch (error) {
-    console.log('Transcript fetch failed, trying alternative method...');
-    // Alternativă: foloseşti youtube-transcript npm package
-    return '';
-  }
-}
-
-// Traduce cu GPT-4 o-mini
-async function translateWithGPT4(text) {
-  try {
-    const response = await axios.post(
-      'https://api.openai.com/v1/chat/completions',
-      {
-        model: 'gpt-4o-mini',
+    const response = await fetch("https://api.openai.com/v1/chat/completions", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: `Bearer ${process.env.OPENAI_API_KEY}`,
+      },
+      body: JSON.stringify({
+        model: "gpt-4o-mini",
         messages: [
           {
-            role: 'system',
+            role: "system",
             content:
-              'Ești un traducător profesionist. Traduce următorul text din engleză în română. Păstrează formatul și sensul original.',
+              "Tradu următorul text din engleză în română păstrând integritatea sensului.",
           },
           {
-            role: 'user',
-            content: `Traduce acest transcript:\n\n${text.substring(0, 3000)}`,
+            role: "user",
+            content: text,
           },
         ],
-        temperature: 0.7,
-        max_tokens: 2000,
-      },
-      {
-        headers: {
-          Authorization: `Bearer ${OPENAI_API_KEY}`,
-          'Content-Type': 'application/json',
-        },
-      }
-    );
+      }),
+    });
 
-    return response.data.choices[0].message.content;
-  } catch (error) {
-    console.error('GPT-4 translation error:', error.message);
-    throw error;
+    const data = await response.json();
+    return data.choices[0].message.content;
+  } catch (err) {
+    console.error("Eroare la traducere GPT:", err.message);
+    return "";
   }
 }
 
-// Health check
-app.get('/api/health', (req, res) => {
-  res.json({ status: 'OK', timestamp: new Date().toISOString() });
-});
-
+// Pornește serverul
 const PORT = process.env.PORT || 3000;
 app.listen(PORT, () => {
-  console.log(`🚀 Server running on http://localhost:${PORT}`);
+  console.log(`🚀 Server pornit pe http://localhost:${PORT}`);
 });

@@ -1,21 +1,25 @@
 FROM node:18-alpine
 
+# Instalează yt-dlp și toate dependențele necesare
+RUN apk add --no-cache \
+    python3 \
+    ffmpeg \
+    py3-pip \
+    && pip install yt-dlp
+
+# Setează directorul de lucru
 WORKDIR /app
 
-# Copy files
+# Copiază toate fișierele aplicației în container
 COPY package*.json ./
 COPY server.js ./
 COPY public ./public
 
-# Install dependencies
+# Instalează dependențele aplicației Node.js
 RUN npm install --production
 
-# Expose port
+# Expune portul aplicației
 EXPOSE 3000
 
-# Health check
-HEALTHCHECK --interval=30s --timeout=3s --start-period=5s --retries=3 \
-    CMD node -e "require('http').get('http://localhost:3000/api/health', (r) => {if (r.statusCode !== 200) throw new Error(r.statusCode)})"
-
-# Start app
-CMD ["npm", "start"]
+# Pornește aplicația
+CMD ["node", "server.js"]
