@@ -1,22 +1,28 @@
-FROM node:18-alpine
+# Folosește imaginea oficială Node.js bazată pe Debian Slim
+FROM node:18-bullseye-slim
 
-# Instalează yt-dlp și toate dependențele necesare
-RUN apk add --no-cache \
-    python3 \
-    ffmpeg \
-    py3-pip \
-    && pip install yt-dlp
+# Actualizează lista de pachete și instalează Python, pip și ffmpeg
+RUN apt-get update && apt-get install -y python3-pip ffmpeg && \
+    rm -rf /var/lib/apt/lists/*
 
-# Setează directorul de lucru
+# Creează și activează un mediu virtual Python
+RUN python3 -m venv /venv && \
+    /venv/bin/pip install --upgrade pip && \
+    /venv/bin/pip install yt-dlp
+
+# Setează directorul ca fiind directorul de lucru în container
 WORKDIR /app
 
-# Copiază toate fișierele aplicației în container
+# Copiază fișierele aplicației în container
 COPY package*.json ./
 COPY server.js ./
 COPY public ./public
 
-# Instalează dependențele aplicației Node.js
+# Instalează dependențele Node.js pentru producție
 RUN npm install --production
+
+# Configurează variabilele PATH pentru mediu virtual Python
+ENV PATH="/venv/bin:$PATH"
 
 # Expune portul aplicației
 EXPOSE 3000
