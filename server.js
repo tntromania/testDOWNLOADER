@@ -13,75 +13,106 @@ app.use(cors());
 app.use(express.json());
 app.use(express.static('public'));
 
-// Env variables are now directly fetched from the system (Coolify/Environment)
+// Env variables are now directly fetched from the system (e.g., Coolify/Environment variables)
 const RAPIDAPI_KEY = process.env.RAPIDAPI_KEY;
 const RAPIDAPI_HOST = 'youtube-video-and-shorts-downloader.p.rapidapi.com';
 const OPENAI_API_KEY = process.env.OPENAI_API_KEY;
 
-// Download video și obține transcript
+// Route for downloading video and getting transcript
 app.post('/api/download', async (req, res) => {
   try {
+    // Extract the URL from the request body
     const { url } = req.body;
 
     if (!url) {
+      console.log('Client did not provide a URL.');
       return res.status(400).json({ error: 'YouTube URL este obligatoriu' });
     }
 
-    // Extrage video ID
+    // Extract the video ID from the URL
     const videoId = extractVideoId(url);
     if (!videoId) {
+      console.log('Invalid YouTube URL:', url);
       return res.status(400).json({ error: 'URL YouTube invalid' });
     }
 
-    console.log(`Processing video: ${videoId}`);
+    console.log(`Processing video ID: ${videoId}`);
 
-    // Apelează RapidAPI pentru obținerea metadatelor video
-    const videoResponse = await axios.get(
-      'https://youtube-video-and-shorts-downloader.p.rapidapi.com/video.php',
-      {
-        params: {
-          id: videoId,
-        },
-        headers: {
-          'x-rapidapi-key': RAPIDAPI_KEY,
-          'x-rapidapi-host': RAPIDAPI_HOST,
-        },
-      }
-    );
+    // Contact RapidAPI to get video metadata
+    let videoData;
+    try {
+      console.log('Sending request to RapidAPI for video metadata...');
+      const videoResponse = await axios.get(
+        `https://${RAPIDAPI_HOST}/video.php`,
+        {
+          params: {
+            id: videoId,
+          },
+          headers: {
+            'x-rapidapi-key': RAPIDAPI_KEY,
+            'x-rapidapi-host': RAPIDAPI_HOST,
+          },
+        }
+      );
+      videoData = videoResponse.data;
 
-    if (videoResponse.data.status !== 'success') {
+      console.log('Received video metadata from RapidAPI:', videoData);
+    } catch (error) {
+      console.error('Error while fetching video metadata from RapidAPI:');
+      console.error(error.response?.data || error.message);
       return res.status(500).json({
         error: 'Eroare la obținerea informațiilor video',
-        details: videoResponse.data,
+        details: error.response?.data || error.message,
       });
     }
 
-    const videoData = videoResponse.data;
+    // Ensure video response is successful
+    if (videoData.status !== 'success') {
+      console.error('RapidAPI video metadata response was not successful:', videoData);
+      return res.status(500).json({
+        error: 'Eroare la obținerea informațiilor video',
+        details: videoData,
+      });
+    }
 
-    // Apelează RapidAPI pentru obținerea streamurilor de descărcare
-    const downloadResponse = await axios.get(
-      'https://youtube-video-and-shorts-downloader.p.rapidapi.com/download.php',
-      {
-        params: {
-          id: videoId,
-        },
-        headers: {
-          'x-rapidapi-key': RAPIDAPI_KEY,
-          'x-rapidapi-host': RAPIDAPI_HOST,
-        },
-      }
-    );
+    // Contact RapidAPI to get download streams
+    let downloadData;
+    try {
+      console.log('Sending request to RapidAPI for download streams...');
+      const downloadResponse = await axios.get(
+        `https://${RAPIDAPI_HOST}/download.php`,
+        {
+          params: {
+            id: videoId,
+          },
+          headers: {
+            'x-rapidapi-key': RAPIDAPI_KEY,
+            'x-rapidapi-host': RAPIDAPI_HOST,
+          },
+        }
+      );
+      downloadData = downloadResponse.data;
 
-    if (downloadResponse.data.status !== 'success') {
+      console.log('Received download streams from RapidAPI:', downloadData);
+    } catch (error) {
+      console.error('Error while fetching download streams from RapidAPI:');
+      console.error(error.response?.data || error.message);
       return res.status(500).json({
         error: 'Eroare la obținerea streamurilor de descărcare',
-        details: downloadResponse.data,
+        details: error.response?.data || error.message,
       });
     }
 
-    const downloadData = downloadResponse.data;
+    // Ensure download response is successful
+    if (downloadData.status !== 'success') {
+      console.error('RapidAPI download response was not successful:', downloadData);
+      return res.status(500).json({
+        error: 'Eroare la obținerea streamurilor de descărcare',
+        details: downloadData,
+      });
+    }
 
-    // Obține transcript
+    // Optionally fetch transcript and translation (asynchronous)
     let transcript = '';
     let translatedTranscript = '';
     try {
@@ -90,27 +121,27 @@ app.post('/api/download', async (req, res) => {
         translatedTranscript = await translateWithGPT4(transcript);
       }
     } catch (transcriptError) {
-      console.log('Transcript not available:', transcriptError.message);
+      console.log('Transcript or translation not available:', transcriptError.message);
     }
 
+    // Return response to client
     res.json({
       success: true,
       videoInfo: videoData,
-      download: downloadData, // Streamurile disponibile pentru descărcare
+      download: downloadData,
       transcript: transcript,
       translatedTranscript: translatedTranscript,
       videoId: videoId,
     });
   } catch (error) {
-    console.error('Error:', error.message);
+    console.error('Unexpected server error:', error.message);
     res.status(500).json({
-      error: error.message || 'Eroare la procesare',
-      details: error.response?.data || null,
+      error: error.message || 'Eroare la procesare.',
     });
   }
 });
 
-// Funcție pentru extragere video ID
+// Extract video ID from a YouTube URL
 function extractVideoId(url) {
   const regexes = [
     /(?:youtube\.com\/watch\?v=|youtu\.be\/)([^&\n?#]+)/,
@@ -124,7 +155,7 @@ function extractVideoId(url) {
   return null;
 }
 
-// Obține transcript de pe YouTube
+// Fetch YouTube transcript (optional functionality for testing with AI translation)
 async function getTranscript(videoId) {
   try {
     const response = await axios.get(
@@ -140,19 +171,17 @@ async function getTranscript(videoId) {
     );
 
     if (response.data?.responseContext) {
-      // Parse transcript
       const transcriptData = response.data.responseContext;
       return JSON.stringify(transcriptData);
     }
     return '';
   } catch (error) {
-    console.log('Transcript fetch failed, trying alternative method...');
-    // Alternativă: foloseşti youtube-transcript npm package
+    console.log('Transcript fetch failed:', error.message);
     return '';
   }
 }
 
-// Traduce cu GPT-4 o-mini
+// Translate text with GPT-4 model
 async function translateWithGPT4(text) {
   try {
     const response = await axios.post(
@@ -183,16 +212,17 @@ async function translateWithGPT4(text) {
 
     return response.data.choices[0].message.content;
   } catch (error) {
-    console.error('GPT-4 translation error:', error.message);
-    throw error;
+    console.error('Translation error with GPT-4:', error.message);
+    return '';
   }
 }
 
-// Health check
+// Health check route
 app.get('/api/health', (req, res) => {
   res.json({ status: 'OK', timestamp: new Date().toISOString() });
 });
 
+// Start the server
 const PORT = process.env.PORT || 3000;
 app.listen(PORT, () => {
   console.log(`🚀 Server running on http://localhost:${PORT}`);
