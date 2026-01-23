@@ -12,10 +12,13 @@ app.use(express.json());
 app.use(cors());
 app.use(express.static("public"));
 
-// Initialize OpenAI
-const openai = new OpenAI({
-  apiKey: process.env.OPENAI_API_KEY,
-});
+// Initialize OpenAI only if API key is available
+let openai = null;
+if (process.env.OPENAI_API_KEY && process.env.OPENAI_API_KEY !== 'test_key_placeholder') {
+  openai = new OpenAI({
+    apiKey: process.env.OPENAI_API_KEY,
+  });
+}
 
 // Extract video ID from YouTube URL
 function extractVideoId(url) {
@@ -52,7 +55,16 @@ app.post("/api/transcript", async (req, res) => {
     console.log(`Processing transcript for video: ${videoId}`);
 
     // Get transcript
-    const transcriptData = await YoutubeTranscript.fetchTranscript(videoId);
+    let transcriptData;
+    try {
+      transcriptData = await YoutubeTranscript.fetchTranscript(videoId);
+    } catch (transcriptError) {
+      console.error("Error fetching transcript:", transcriptError.message);
+      return res.status(404).json({ 
+        error: "Transcript indisponibil pentru acest video.",
+        details: transcriptError.message 
+      });
+    }
     
     if (!transcriptData || transcriptData.length === 0) {
       return res.status(404).json({ error: "Transcript indisponibil pentru acest video." });
@@ -65,12 +77,17 @@ app.post("/api/transcript", async (req, res) => {
 
     // Translate with GPT-4o mini
     let translatedText = "";
-    if (process.env.OPENAI_API_KEY) {
+    if (openai) {
       console.log("Traducere transcript cu GPT-4o mini...");
-      translatedText = await translateWithGPT(originalText);
+      try {
+        translatedText = await translateWithGPT(originalText);
+      } catch (translateError) {
+        console.error("Translation error:", translateError.message);
+        translatedText = "Eroare la traducere: " + translateError.message;
+      }
     } else {
-      console.warn("OPENAI_API_KEY nu este setat, traducerea este omisă.");
-      translatedText = "API key lipsă - traducerea nu a putut fi efectuată.";
+      console.warn("OPENAI_API_KEY nu este setat corect, traducerea este omisă.");
+      translatedText = "API key lipsă - traducerea nu a putut fi efectuată. Configurați OPENAI_API_KEY în fișierul .env";
     }
 
     // Return both original and translated
@@ -81,13 +98,17 @@ app.post("/api/transcript", async (req, res) => {
       transcriptData: transcriptData.slice(0, 10), // First 10 items with timestamps
     });
   } catch (error) {
-    console.error("Server error:", error.message);
+    console.error("Server error:", error);
     res.status(500).json({ error: "Eroare la procesare: " + error.message });
   }
 });
 
 // Translate text using GPT-4o mini
 async function translateWithGPT(text) {
+  if (!openai) {
+    throw new Error("OpenAI client not initialized");
+  }
+  
   try {
     const completion = await openai.chat.completions.create({
       model: "gpt-4o-mini",
@@ -113,7 +134,11 @@ async function translateWithGPT(text) {
 
 // Health check endpoint
 app.get("/api/health", (req, res) => {
-  res.json({ status: "ok", message: "Server funcționează!" });
+  res.json({ 
+    status: "ok", 
+    message: "Server funcționează!",
+    openaiConfigured: !!openai
+  });
 });
 
 // Start server
@@ -121,4 +146,5 @@ const PORT = process.env.PORT || 3000;
 app.listen(PORT, () => {
   console.log(`🚀 Server pornit pe http://localhost:${PORT}`);
   console.log(`📝 API disponibil la http://localhost:${PORT}/api/transcript`);
+  console.log(`🔑 OpenAI configured: ${!!openai}`);
 });
