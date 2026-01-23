@@ -12,9 +12,18 @@ app.use(express.json());
 app.use(cors());
 app.use(express.static("public"));
 
-// Initialize OpenAI only if API key is available
+// Constants
+const MAX_TRANSCRIPT_PREVIEW_ITEMS = 10;
+const ERROR_MESSAGES = {
+  NO_API_KEY: "API key lipsă - traducerea nu a putut fi efectuată. Configurați OPENAI_API_KEY în fișierul .env",
+  TRANSCRIPT_UNAVAILABLE: "Transcript indisponibil pentru acest video.",
+  INVALID_URL: "URL YouTube invalid.",
+  URL_REQUIRED: "URL YouTube este obligatoriu!",
+};
+
+// Initialize OpenAI only if API key is available and valid
 let openai = null;
-if (process.env.OPENAI_API_KEY && process.env.OPENAI_API_KEY !== 'test_key_placeholder') {
+if (process.env.OPENAI_API_KEY && process.env.OPENAI_API_KEY.startsWith('sk-')) {
   openai = new OpenAI({
     apiKey: process.env.OPENAI_API_KEY,
   });
@@ -42,14 +51,14 @@ app.post("/api/transcript", async (req, res) => {
   const { url } = req.body;
 
   if (!url) {
-    return res.status(400).json({ error: "URL YouTube este obligatoriu!" });
+    return res.status(400).json({ error: ERROR_MESSAGES.URL_REQUIRED });
   }
 
   try {
     // Extract video ID
     const videoId = extractVideoId(url);
     if (!videoId) {
-      return res.status(400).json({ error: "URL YouTube invalid." });
+      return res.status(400).json({ error: ERROR_MESSAGES.INVALID_URL });
     }
 
     console.log(`Processing transcript for video: ${videoId}`);
@@ -61,13 +70,13 @@ app.post("/api/transcript", async (req, res) => {
     } catch (transcriptError) {
       console.error("Error fetching transcript:", transcriptError.message);
       return res.status(404).json({ 
-        error: "Transcript indisponibil pentru acest video.",
+        error: ERROR_MESSAGES.TRANSCRIPT_UNAVAILABLE,
         details: transcriptError.message 
       });
     }
     
     if (!transcriptData || transcriptData.length === 0) {
-      return res.status(404).json({ error: "Transcript indisponibil pentru acest video." });
+      return res.status(404).json({ error: ERROR_MESSAGES.TRANSCRIPT_UNAVAILABLE });
     }
 
     // Combine transcript text
@@ -87,7 +96,7 @@ app.post("/api/transcript", async (req, res) => {
       }
     } else {
       console.warn("OPENAI_API_KEY nu este setat corect, traducerea este omisă.");
-      translatedText = "API key lipsă - traducerea nu a putut fi efectuată. Configurați OPENAI_API_KEY în fișierul .env";
+      translatedText = ERROR_MESSAGES.NO_API_KEY;
     }
 
     // Return both original and translated
@@ -95,7 +104,7 @@ app.post("/api/transcript", async (req, res) => {
       videoId,
       original: originalText,
       translated: translatedText,
-      transcriptData: transcriptData.slice(0, 10), // First 10 items with timestamps
+      transcriptData: transcriptData.slice(0, MAX_TRANSCRIPT_PREVIEW_ITEMS),
     });
   } catch (error) {
     console.error("Server error:", error);
