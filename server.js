@@ -13,7 +13,7 @@ app.use(cors());
 app.use(express.json());
 app.use(express.static('public'));
 
-// Env variables are now directly fetched from the system (provided by Coolify)
+// Env variables are now directly fetched from the system (Coolify/Environment)
 const RAPIDAPI_KEY = process.env.RAPIDAPI_KEY;
 const RAPIDAPI_HOST = 'youtube-video-and-shorts-downloader.p.rapidapi.com';
 const OPENAI_API_KEY = process.env.OPENAI_API_KEY;
@@ -35,12 +35,12 @@ app.post('/api/download', async (req, res) => {
 
     console.log(`Processing video: ${videoId}`);
 
-    // Apelează RapidAPI pentru download info
-    const downloadResponse = await axios.get(
-      'https://youtube-video-and-shorts-downloader.p.rapidapi.com/download',
+    // Apelează RapidAPI pentru obținerea metadatelor video
+    const videoResponse = await axios.get(
+      'https://youtube-video-and-shorts-downloader.p.rapidapi.com/video.php',
       {
         params: {
-          url: url,
+          id: videoId,
         },
         headers: {
           'x-rapidapi-key': RAPIDAPI_KEY,
@@ -48,6 +48,36 @@ app.post('/api/download', async (req, res) => {
         },
       }
     );
+
+    if (videoResponse.data.status !== 'success') {
+      return res.status(500).json({
+        error: 'Eroare la obținerea informațiilor video',
+        details: videoResponse.data,
+      });
+    }
+
+    const videoData = videoResponse.data;
+
+    // Apelează RapidAPI pentru obținerea streamurilor de descărcare
+    const downloadResponse = await axios.get(
+      'https://youtube-video-and-shorts-downloader.p.rapidapi.com/download.php',
+      {
+        params: {
+          id: videoId,
+        },
+        headers: {
+          'x-rapidapi-key': RAPIDAPI_KEY,
+          'x-rapidapi-host': RAPIDAPI_HOST,
+        },
+      }
+    );
+
+    if (downloadResponse.data.status !== 'success') {
+      return res.status(500).json({
+        error: 'Eroare la obținerea streamurilor de descărcare',
+        details: downloadResponse.data,
+      });
+    }
 
     const downloadData = downloadResponse.data;
 
@@ -65,7 +95,8 @@ app.post('/api/download', async (req, res) => {
 
     res.json({
       success: true,
-      download: downloadData,
+      videoInfo: videoData,
+      download: downloadData, // Streamurile disponibile pentru descărcare
       transcript: transcript,
       translatedTranscript: translatedTranscript,
       videoId: videoId,
