@@ -1,16 +1,41 @@
 import express from "express";
 import cors from "cors";
-import { exec } from "child_process";
-import { createReadStream } from "fs";
-import { pipeline } from "stream";
-import { getTranscript } from "youtube-transcript";
+import dotenv from "dotenv";
+import { YoutubeTranscript } from "youtube-transcript";
+import OpenAI from "openai";
+
+// Load environment variables
+dotenv.config();
 
 const app = express();
 app.use(express.json());
 app.use(cors());
+app.use(express.static("public"));
 
-// Descărcare instant + transcript
-app.post("/api/download", async (req, res) => {
+// Initialize OpenAI
+const openai = new OpenAI({
+  apiKey: process.env.OPENAI_API_KEY,
+});
+
+// Extract video ID from YouTube URL
+function extractVideoId(url) {
+  const patterns = [
+    /(?:youtube\.com\/watch\?v=|youtu\.be\/)([^&\n?#]+)/,
+    /youtube\.com\/embed\/([^&\n?#]+)/,
+    /youtube\.com\/v\/([^&\n?#]+)/,
+  ];
+
+  for (const pattern of patterns) {
+    const match = url.match(pattern);
+    if (match && match[1]) {
+      return match[1];
+    }
+  }
+  return null;
+}
+
+// Endpoint pentru a obține transcriptul și traducerea
+app.post("/api/transcript", async (req, res) => {
   const { url } = req.body;
 
   if (!url) {
@@ -18,91 +43,82 @@ app.post("/api/download", async (req, res) => {
   }
 
   try {
-    // Validează URL și obține video ID
-    const videoId = url.split("v=")[1]?.split("&")[0] || url.split("/").pop();
+    // Extract video ID
+    const videoId = extractVideoId(url);
     if (!videoId) {
       return res.status(400).json({ error: "URL YouTube invalid." });
     }
 
-    console.log(`Processing video: ${videoId}`);
+    console.log(`Processing transcript for video: ${videoId}`);
 
-    // Generează comanda yt-dlp pentru descărcare directă (stream prin STDOUT)
-    const command = `yt-dlp -o - -f best ${url}`;
-    console.log(`Executing command: ${command}`);
-
-    // Pornire transmisie video directă
-    const stream = exec(command, { maxBuffer: 1024 * 1024 * 100 });
-    res.writeHead(200, {
-      "Content-Disposition": `attachment; filename="video.mp4"`,
-      "Content-Type": "video/mp4",
-    });
-
-    stream.stdout.pipe(res); // Conectează stream-ul direct la răspunsul HTTP
-    stream.stderr.on("data", (data) => console.error(data.toString()));
-    stream.on("close", () => console.log("Download complete"));
-
-    // Obține transcript
-    let transcript = [];
-    try {
-      transcript = await getTranscript(videoId);
-    } catch (err) {
-      console.log("Transcript indisponibil:", err.message);
+    // Get transcript
+    const transcriptData = await YoutubeTranscript.fetchTranscript(videoId);
+    
+    if (!transcriptData || transcriptData.length === 0) {
+      return res.status(404).json({ error: "Transcript indisponibil pentru acest video." });
     }
 
-    // Traduce transcript cu GPT
-    let translatedTranscript = "";
-    if (transcript && transcript.length > 0) {
-      translatedTranscript = await translateWithGPT(
-        transcript.map((t) => t.text).join("\n")
-      );
+    // Combine transcript text
+    const originalText = transcriptData.map((item) => item.text).join(" ");
+
+    console.log(`Transcript obținut, lungime: ${originalText.length} caractere`);
+
+    // Translate with GPT-4o mini
+    let translatedText = "";
+    if (process.env.OPENAI_API_KEY) {
+      console.log("Traducere transcript cu GPT-4o mini...");
+      translatedText = await translateWithGPT(originalText);
+    } else {
+      console.warn("OPENAI_API_KEY nu este setat, traducerea este omisă.");
+      translatedText = "API key lipsă - traducerea nu a putut fi efectuată.";
     }
 
-    // Adaugă transcriptul tradus în răspuns sub formă de JSON metadata
-    res.addTrailers({
-      "x-transcript-original": JSON.stringify(transcript),
-      "x-transcript-translated": translatedTranscript || "Fără traducere",
+    // Return both original and translated
+    res.json({
+      videoId,
+      original: originalText,
+      translated: translatedText,
+      transcriptData: transcriptData.slice(0, 10), // First 10 items with timestamps
     });
   } catch (error) {
     console.error("Server error:", error.message);
-    res.status(500).json({ error: "Eroare la procesare." });
+    res.status(500).json({ error: "Eroare la procesare: " + error.message });
   }
 });
 
-// Funcție pentru traducerea cu GPT
+// Translate text using GPT-4o mini
 async function translateWithGPT(text) {
   try {
-    const response = await fetch("https://api.openai.com/v1/chat/completions", {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        Authorization: `Bearer ${process.env.OPENAI_API_KEY}`,
-      },
-      body: JSON.stringify({
-        model: "gpt-4o-mini",
-        messages: [
-          {
-            role: "system",
-            content:
-              "Tradu următorul text din engleză în română păstrând integritatea sensului.",
-          },
-          {
-            role: "user",
-            content: text,
-          },
-        ],
-      }),
+    const completion = await openai.chat.completions.create({
+      model: "gpt-4o-mini",
+      messages: [
+        {
+          role: "system",
+          content: "Ești un translator profesionist. Traduce textul următor în limba română, păstrând sensul original și folosind un limbaj natural.",
+        },
+        {
+          role: "user",
+          content: text,
+        },
+      ],
+      temperature: 0.3,
     });
 
-    const data = await response.json();
-    return data.choices[0].message.content;
+    return completion.choices[0].message.content;
   } catch (err) {
     console.error("Eroare la traducere GPT:", err.message);
-    return "";
+    throw new Error("Traducerea a eșuat: " + err.message);
   }
 }
 
-// Pornește serverul
+// Health check endpoint
+app.get("/api/health", (req, res) => {
+  res.json({ status: "ok", message: "Server funcționează!" });
+});
+
+// Start server
 const PORT = process.env.PORT || 3000;
 app.listen(PORT, () => {
   console.log(`🚀 Server pornit pe http://localhost:${PORT}`);
+  console.log(`📝 API disponibil la http://localhost:${PORT}/api/transcript`);
 });

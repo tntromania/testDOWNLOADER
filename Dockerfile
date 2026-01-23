@@ -1,35 +1,24 @@
-# Folosește Debian Slim - mai suportat față de Alpine pentru aplicatii complexe
+# Use Node.js 18 on Debian Slim
 FROM node:18-bullseye-slim
 
-# Actualizează lista de pachete și instalează Python, pip și ffmpeg
-RUN apt-get update && apt-get install -y \
-  python3 \
-  python3-venv \
-  python3-pip \
-  ffmpeg \
-  && rm -rf /var/lib/apt/lists/*
-
-# Creează mediu virtual Python și instalează yt-dlp
-RUN python3 -m venv /venv && \
-  /venv/bin/pip install --upgrade pip && \
-  /venv/bin/pip install yt-dlp
-
-# Setează directorul de lucru
+# Set working directory
 WORKDIR /app
 
-# Copiază fișierele aplicației
+# Copy package files
 COPY package*.json ./
+
+# Install Node.js dependencies
+RUN npm install --production
+
+# Copy application files
 COPY server.js ./
 COPY public ./public
 
-# Instalează dependințele Node.js
-RUN npm install --production
-
-# Configurează path-ul pentru mediu virtual
-ENV PATH="/venv/bin:$PATH"
-
-# Expune portul aplicației
+# Expose port
 EXPOSE 3000
 
-# Pornește aplicația
+# Set environment variable
+ENV PORT=3000
+
+# Start the application
 CMD ["node", "server.js"]

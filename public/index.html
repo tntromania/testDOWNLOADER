@@ -3,74 +3,164 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>YouTube Downloader & Transcript</title>
+  <title>YouTube Transcript & Translator</title>
   <style>
     body {
       font-family: Arial, sans-serif;
-      text-align: center;
+      max-width: 900px;
+      margin: 0 auto;
       padding: 20px;
+      background-color: #f5f5f5;
     }
-    input, button {
-      margin: 10px;
-      padding: 10px;
+    .container {
+      background: white;
+      padding: 30px;
+      border-radius: 10px;
+      box-shadow: 0 2px 10px rgba(0,0,0,0.1);
+    }
+    h1 {
+      color: #ff0000;
+      text-align: center;
+    }
+    .input-group {
+      margin: 20px 0;
+    }
+    input {
+      width: 100%;
+      padding: 12px;
+      font-size: 16px;
+      border: 2px solid #ddd;
+      border-radius: 5px;
+      box-sizing: border-box;
+    }
+    button {
+      width: 100%;
+      padding: 12px;
+      font-size: 16px;
+      background-color: #ff0000;
+      color: white;
+      border: none;
+      border-radius: 5px;
+      cursor: pointer;
+      margin-top: 10px;
+    }
+    button:hover {
+      background-color: #cc0000;
+    }
+    button:disabled {
+      background-color: #ccc;
+      cursor: not-allowed;
     }
     .results {
+      margin-top: 30px;
+    }
+    .transcript-box {
+      background: #f9f9f9;
+      border: 1px solid #ddd;
+      border-radius: 5px;
+      padding: 15px;
+      margin: 10px 0;
+      max-height: 300px;
+      overflow-y: auto;
+      white-space: pre-wrap;
+      word-wrap: break-word;
+    }
+    h3 {
+      color: #333;
       margin-top: 20px;
+    }
+    .loading {
+      text-align: center;
+      color: #666;
+      margin: 20px 0;
+    }
+    .error {
+      background-color: #ffe6e6;
+      color: #cc0000;
+      padding: 10px;
+      border-radius: 5px;
+      margin: 10px 0;
+    }
+    .success {
+      background-color: #e6ffe6;
+      color: #00cc00;
+      padding: 10px;
+      border-radius: 5px;
+      margin: 10px 0;
     }
   </style>
 </head>
 <body>
-  <h1>YouTube Downloader & Translator</h1>
-  <p>Introduceți link-ul complet al unui video YouTube pentru a descărca și a obține transcriptul tradus automat.</p>
+  <div class="container">
+    <h1>📺 YouTube Transcript & Translator</h1>
+    <p style="text-align: center;">Introduceți link-ul unui video YouTube pentru a obține transcriptul tradus automat în română cu GPT-4o mini.</p>
 
-  <input type="text" id="youtubeUrl" placeholder="Pastează URL-ul YouTube..." />
-  <button onclick="downloadAndFetchTranscript()">Descarcă Video</button>
+    <div class="input-group">
+      <input type="text" id="youtubeUrl" placeholder="Introduceți URL-ul YouTube (ex: https://www.youtube.com/watch?v=...)" />
+      <button onclick="fetchTranscript()" id="submitBtn">Obține Transcript & Traducere</button>
+    </div>
 
-  <div class="results" id="results" style="display: none;">
-    <h3>Rezultate:</h3>
-    <p><strong>Transcript original:</strong></p>
-    <pre id="originalTranscript"></pre>
-    <p><strong>Transcript tradus:</strong></p>
-    <pre id="translatedTranscript"></pre>
+    <div id="message"></div>
+
+    <div class="results" id="results" style="display: none;">
+      <h3>📝 Transcript Original:</h3>
+      <div class="transcript-box" id="originalTranscript"></div>
+
+      <h3>🌐 Transcript Tradus în Română:</h3>
+      <div class="transcript-box" id="translatedTranscript"></div>
+    </div>
   </div>
 
   <script>
-    async function downloadAndFetchTranscript() {
+    async function fetchTranscript() {
       const url = document.getElementById("youtubeUrl").value.trim();
+      const submitBtn = document.getElementById("submitBtn");
+      const messageDiv = document.getElementById("message");
+      const resultsDiv = document.getElementById("results");
+      
       if (!url) {
-        alert("Introduceți un URL valid!");
+        messageDiv.innerHTML = '<div class="error">⚠️ Introduceți un URL valid!</div>';
         return;
       }
 
+      // Reset UI
+      messageDiv.innerHTML = '<div class="loading">⏳ Se procesează... Vă rugăm așteptați...</div>';
+      resultsDiv.style.display = "none";
+      submitBtn.disabled = true;
+
       try {
-        const response = await fetch("/api/download", {
+        const response = await fetch("/api/transcript", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({ url }),
         });
 
+        const data = await response.json();
+
         if (!response.ok) {
-          alert("Descărcarea a eșuat!");
-          return;
+          throw new Error(data.error || "Eroare la procesare");
         }
 
-        const originalTranscript = response.headers.get("x-transcript-original");
-        const translatedTranscript = response.headers.get(
-          "x-transcript-translated"
-        );
-
-        document.getElementById("results").style.display = "block";
-        document.getElementById("originalTranscript").textContent =
-          originalTranscript || "N/A";
-        document.getElementById("translatedTranscript").textContent =
-          translatedTranscript || "Fără traducere";
-
-        window.open(response.url, "_blank");
+        // Display results
+        document.getElementById("originalTranscript").textContent = data.original || "N/A";
+        document.getElementById("translatedTranscript").textContent = data.translated || "Traducere indisponibilă";
+        
+        resultsDiv.style.display = "block";
+        messageDiv.innerHTML = '<div class="success">✅ Transcriptul a fost obținut și tradus cu succes!</div>';
       } catch (err) {
-        console.error("Eroare la descărcare:", err);
-        alert("A apărut o eroare la procesare.");
+        console.error("Eroare:", err);
+        messageDiv.innerHTML = `<div class="error">❌ ${err.message}</div>`;
+      } finally {
+        submitBtn.disabled = false;
       }
     }
+
+    // Allow Enter key to submit
+    document.getElementById("youtubeUrl").addEventListener("keypress", function(e) {
+      if (e.key === "Enter") {
+        fetchTranscript();
+      }
+    });
   </script>
 </body>
 </html>
