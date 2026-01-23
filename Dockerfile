@@ -1,35 +1,36 @@
-# Folosește Debian Slim - mai suportat față de Alpine pentru aplicatii complexe
-FROM node:18-bullseye-slim
+# 1. Base image
+FROM node:18-alpine AS base
 
-# Actualizează lista de pachete și instalează Python, pip și ffmpeg
-RUN apt-get update && apt-get install -y \
-  python3 \
-  python3-venv \
-  python3-pip \
-  ffmpeg \
-  && rm -rf /var/lib/apt/lists/*
-
-# Creează mediu virtual Python și instalează yt-dlp
-RUN python3 -m venv /venv && \
-  /venv/bin/pip install --upgrade pip && \
-  /venv/bin/pip install yt-dlp
-
-# Setează directorul de lucru
+# 2. Dependencies
+FROM base AS deps
 WORKDIR /app
+COPY package.json package-lock.json* ./
+# SCHIMBARE AICI: Folosim 'npm install' in loc de 'npm ci' pentru ca nu ai package-lock.json
+RUN npm install
 
-# Copiază fișierele aplicației
-COPY package*.json ./
-COPY server.js ./
-COPY public ./public
+# 3. Builder
+FROM base AS builder
+WORKDIR /app
+COPY --from=deps /app/node_modules ./node_modules
+COPY . .
+RUN npm run build
 
-# Instalează dependințele Node.js
-RUN npm install --production
+# 4. Runner
+FROM base AS runner
+WORKDIR /app
+# Corectie sintaxa ENV (key=value) pentru a elimina warning-urile din log
+ENV NODE_ENV=production
 
-# Configurează path-ul pentru mediu virtual
-ENV PATH="/venv/bin:$PATH"
+RUN addgroup --system --gid 1001 nodejs
+RUN adduser --system --uid 1001 nextjs
 
-# Expune portul aplicației
+COPY --from=builder /app/public ./public
+COPY --from=builder --chown=nextjs:nodejs /app/.next/standalone ./
+COPY --from=builder --chown=nextjs:nodejs /app/.next/static ./.next/static
+
+USER nextjs
+
 EXPOSE 3000
+ENV PORT=3000
 
-# Pornește aplicația
 CMD ["node", "server.js"]
