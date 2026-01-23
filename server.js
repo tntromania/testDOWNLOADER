@@ -1,11 +1,8 @@
 import express from 'express';
 import axios from 'axios';
 import cors from 'cors';
-import dotenv from 'dotenv';
 import path from 'path';
 import { fileURLToPath } from 'url';
-
-dotenv.config();
 
 const app = express();
 const __filename = fileURLToPath(import.meta.url);
@@ -16,6 +13,7 @@ app.use(cors());
 app.use(express.json());
 app.use(express.static('public'));
 
+// Env variables are now directly fetched from the system (provided by Coolify)
 const RAPIDAPI_KEY = process.env.RAPIDAPI_KEY;
 const RAPIDAPI_HOST = 'youtube-video-and-shorts-downloader.p.rapidapi.com';
 const OPENAI_API_KEY = process.env.OPENAI_API_KEY;
