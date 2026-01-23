@@ -1,27 +1,31 @@
-# Folosește imaginea oficială Node.js bazată pe Debian Slim
+# Folosește Debian Slim - mai suportat față de Alpine pentru aplicatii complexe
 FROM node:18-bullseye-slim
 
 # Actualizează lista de pachete și instalează Python, pip și ffmpeg
-RUN apt-get update && apt-get install -y python3-pip ffmpeg && \
-    rm -rf /var/lib/apt/lists/*
+RUN apt-get update && apt-get install -y \
+  python3 \
+  python3-venv \
+  python3-pip \
+  ffmpeg \
+  && rm -rf /var/lib/apt/lists/*
 
-# Creează și activează un mediu virtual Python
+# Creează mediu virtual Python și instalează yt-dlp
 RUN python3 -m venv /venv && \
-    /venv/bin/pip install --upgrade pip && \
-    /venv/bin/pip install yt-dlp
+  /venv/bin/pip install --upgrade pip && \
+  /venv/bin/pip install yt-dlp
 
-# Setează directorul ca fiind directorul de lucru în container
+# Setează directorul de lucru
 WORKDIR /app
 
-# Copiază fișierele aplicației în container
+# Copiază fișierele aplicației
 COPY package*.json ./
 COPY server.js ./
 COPY public ./public
 
-# Instalează dependențele Node.js pentru producție
+# Instalează dependințele Node.js
 RUN npm install --production
 
-# Configurează variabilele PATH pentru mediu virtual Python
+# Configurează path-ul pentru mediu virtual
 ENV PATH="/venv/bin:$PATH"
 
 # Expune portul aplicației
