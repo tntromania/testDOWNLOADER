@@ -1,76 +1,484 @@
 <!DOCTYPE html>
 <html lang="ro">
 <head>
-  <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>YouTube Downloader & Transcript</title>
-  <style>
-    body {
-      font-family: Arial, sans-serif;
-      text-align: center;
-      padding: 20px;
-    }
-    input, button {
-      margin: 10px;
-      padding: 10px;
-    }
-    .results {
-      margin-top: 20px;
-    }
-  </style>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>YT Processor | Viralio</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800;900&display=swap" rel="stylesheet">
+    <script src="https://accounts.google.com/gsi/client" async defer></script>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    
+    <link rel="apple-touch-icon" sizes="180x180" href="/apple-touch-icon.png">
+    <link rel="icon" type="image/png" sizes="32x32" href="/favicon-32x32.png">
+    <link rel="icon" type="image/png" sizes="16x16" href="/favicon-16x16.png">
+    <link rel="manifest" href="/site.webmanifest">
+    <link rel="shortcut icon" href="/favicon.ico">
+    
+    <script>
+        tailwind.config = {
+            theme: { extend: { fontFamily: { sans: ['Inter', 'sans-serif'] }, colors: { viralio: { 50: '#eef2ff', 100: '#e0e7ff', 500: '#6366f1', 600: '#4f46e5', 900: '#312e81', accent: '#ec4899' } } } }
+        }
+    </script>
+    <style>
+        body { background-color: #F8FAFC; overflow-x: hidden; }
+        .bg-gradient-viralio { background: linear-gradient(135deg, #4f46e5 0%, #ec4899 100%); }
+        ::-webkit-scrollbar { width: 8px; } ::-webkit-scrollbar-track { background: #f1f5f9; } ::-webkit-scrollbar-thumb { background: #cbd5e1; border-radius: 10px; }
+        
+        #login-modal { display: none; position: fixed; inset: 0; background: rgba(15, 23, 42, 0.6); backdrop-filter: blur(8px); z-index: 99999; align-items: center; justify-content: center; opacity: 0; transition: 0.3s; }
+        #login-modal.show { display: flex; opacity: 1; }
+        .modal-content { background: #ffffff; border-radius: 28px; padding: 40px; text-align: center; max-width: 420px; width: 90%; transform: translateY(20px); transition: 0.4s; }
+        #login-modal.show .modal-content { transform: translateY(0); }
+        .yt-input-wrapper { transition: all 0.3s ease; }
+        .yt-input-wrapper:focus-within { transform: translateY(-2px); box-shadow: 0 10px 25px -5px rgba(239, 68, 68, 0.15); }
+
+        /* Animație pentru status */
+        @keyframes pulse-border { 0% { border-color: #e2e8f0; } 50% { border-color: #fca5a5; } 100% { border-color: #e2e8f0; } }
+        .card-processing { animation: pulse-border 2s infinite; }
+    </style>
 </head>
-<body>
-  <h1>YouTube Downloader & Translator</h1>
-  <p>Introduceți link-ul complet al unui video YouTube pentru a descărca și a obține transcriptul tradus automat.</p>
+<body class="md:p-4">
 
-  <input type="text" id="youtubeUrl" placeholder="Pastează URL-ul YouTube..." />
-  <button onclick="downloadAndFetchTranscript()">Descarcă Video</button>
+<div class="bg-white md:rounded-[1.5rem] min-h-screen shadow-xl overflow-hidden relative pb-20 border border-slate-100">
+    
+    <div class="absolute top-0 right-1/4 w-[500px] h-[500px] bg-red-500/5 rounded-full blur-[100px] pointer-events-none z-0 mix-blend-multiply"></div>
 
-  <div class="results" id="results" style="display: none;">
-    <h3>Rezultate:</h3>
-    <p><strong>Transcript original:</strong></p>
-    <pre id="originalTranscript"></pre>
-    <p><strong>Transcript tradus:</strong></p>
-    <pre id="translatedTranscript"></pre>
-  </div>
+    <div class="sticky top-0 z-50 flex w-full justify-center px-2 py-4 md:p-2 max-w-screen-2xl mx-auto">
+        <nav class="w-full rounded-2xl border border-slate-200 bg-white/80 backdrop-blur-xl md:mx-12 shadow-sm px-5 md:px-8 py-3 flex justify-between items-center">
+            <a class="flex items-center font-black text-2xl tracking-tight text-slate-900" href="https://viralio.ro">
+                <div class="w-9 h-9 rounded-xl bg-gradient-viralio flex items-center justify-center text-white mr-2.5 shadow-md"><i class="fa-solid fa-bolt"></i></div>
+                Viralio <span class="text-sm font-medium text-slate-400 ml-2 border-l border-slate-200 pl-2 mt-1">YT Studio</span>
+            </a>
+            <div class="flex items-center justify-end space-x-3">
+                <button onclick="openLoginModal()" id="login-top-btn" class="px-5 py-2.5 bg-slate-900 text-white rounded-xl hover:bg-viralio-600 transition-all font-semibold shadow-md text-sm">Conectează-te</button>
+                <div id="user-profile" class="hidden items-center bg-slate-50 border border-slate-200 py-1 pl-1.5 pr-1.5 rounded-full">
+                    <img id="nav-avatar" src="" class="w-8 h-8 rounded-full border border-slate-200">
+                    <div class="flex flex-col leading-none ml-2 mr-2">
+                        <span id="nav-name" class="text-xs font-bold text-slate-900 mb-0.5"></span>
+                        <span class="text-[0.65rem] font-bold text-viralio-600"><span id="nav-credits">0</span> Credite</span>
+                    </div>
+                    <button onclick="logout()" class="p-2 text-slate-400 hover:text-red-500 transition-colors rounded-full hover:bg-red-50"><i class="fa-solid fa-power-off"></i></button>
+                </div>
+            </div>
+        </nav>
+    </div>
 
-  <script>
-    async function downloadAndFetchTranscript() {
-      const url = document.getElementById("youtubeUrl").value.trim();
-      if (!url) {
-        alert("Introduceți un URL valid!");
-        return;
-      }
+    <div id="login-modal"><div class="modal-content"><button class="absolute top-4 right-5 text-slate-400 hover:text-slate-900" onclick="closeLoginModal()"><i class="fa-solid fa-xmark text-xl"></i></button><div class="w-16 h-16 rounded-2xl bg-indigo-50 text-viralio-600 flex items-center justify-center text-3xl mx-auto mb-4"><i class="fas fa-fingerprint"></i></div><h2 class="text-2xl font-extrabold mb-2 text-slate-900">Intră în cont</h2><p class="text-slate-500 text-sm mb-6">Conectează-te pentru a procesa videoclipuri.</p><div class="flex justify-center bg-slate-50 py-3 rounded-2xl border border-slate-100"><div id="g_id_onload" data-client_id="743541351685-br4h5r61n3ai28bbhm9blt34944rju8p.apps.googleusercontent.com" data-context="signin" data-ux_mode="popup" data-callback="handleCredentialResponse" data-auto_prompt="false"></div><div class="g_id_signin" data-type="standard" data-shape="rectangular" data-theme="outline" data-text="signin_with" data-size="large"></div></div></div></div>
 
-      try {
-        const response = await fetch("/api/download", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ url }),
-        });
+    <div class="max-w-4xl mx-auto px-4 mt-12 relative z-10">
+        
+        <div class="text-center mb-10">
+            <div class="w-20 h-20 rounded-[1.5rem] bg-red-50 border border-red-100 text-red-500 flex items-center justify-center text-4xl mx-auto mb-6 shadow-sm">
+                <i class="fab fa-youtube"></i>
+            </div>
+            <h1 class="text-4xl md:text-5xl font-extrabold mb-4 tracking-tight text-slate-900">YT Batch Downloader</h1>
+            <p class="text-slate-500 text-lg font-medium">Lipește până la 5 link-uri simultan. Noi le descărcăm și extragem subtitrarea tradusă.<br> Cost procesare: <span class="text-amber-600 font-bold bg-amber-50 px-2 py-0.5 rounded border border-amber-100">2 Credite / Link</span></p>
+        </div>
 
-        if (!response.ok) {
-          alert("Descărcarea a eșuat!");
-          return;
+<!-- BATCH INPUT -->
+<div class="max-w-3xl mx-auto mb-4">
+
+    <!-- HEADER PANEL -->
+    <div class="bg-white border border-slate-200 rounded-[1.5rem] shadow-sm overflow-hidden">
+        <div class="flex items-center justify-between px-5 py-3.5 border-b border-slate-100 bg-slate-50">
+            <div class="flex items-center gap-2 text-slate-700 font-bold text-sm">
+                <i class="fas fa-list text-slate-400 text-xs"></i>
+                Linkuri YouTube
+            </div>
+            <span class="text-xs font-bold text-slate-400 bg-white border border-slate-200 px-2.5 py-1 rounded-lg">
+                <span id="link-count">1</span>/5 linkuri
+            </span>
+        </div>
+
+        <!-- LINK ROWS -->
+        <div class="p-3 flex flex-col gap-2" id="links-container">
+            <!-- Populate by JS -->
+        </div>
+
+        <!-- ADD LINK BTN -->
+        <button id="add-link-btn" onclick="addLinkRow()"
+            class="w-full flex items-center justify-center gap-2 text-slate-400 hover:text-red-500 text-sm font-semibold py-3 border-t border-dashed border-slate-200 hover:border-red-300 hover:bg-red-50 transition-all">
+            <i class="fas fa-plus text-xs"></i> Adaugă link
+        </button>
+    </div>
+
+    <!-- CONTROLS -->
+    <div class="flex flex-col sm:flex-row justify-between items-center mt-3 gap-3">
+        <div class="bg-white border border-slate-200 shadow-sm rounded-xl px-4 py-2 flex items-center gap-3">
+            <label class="text-slate-600 font-semibold text-sm"><i class="fas fa-cog text-slate-400 mr-1"></i> Calitate:</label>
+            <select id="rezolutie-select" class="bg-slate-50 border border-slate-200 text-slate-800 font-bold text-sm rounded-lg px-3 py-1 outline-none focus:border-red-500 cursor-pointer">
+                <option value="1080" selected>1080p</option>
+                <option value="720">720p</option>
+                <option value="480">480p</option>
+            </select>
+        </div>
+        <button id="run-btn" class="w-full sm:w-auto bg-red-500 hover:bg-red-600 text-white px-8 py-3.5 rounded-xl font-bold flex items-center justify-center gap-2 transition-all shadow-md">
+            PROCESEAZĂ <i class="fa-solid fa-arrow-right"></i>
+        </button>
+    </div>
+</div>
+
+        <div id="results-container" class="mt-12 space-y-4 max-w-3xl mx-auto"></div>
+
+        <div id="istoric-container" class="hidden mt-12 mb-8 max-w-2xl mx-auto bg-white rounded-2xl border border-slate-200 p-5 shadow-sm text-left">
+            <h4 class="font-bold text-slate-800 mb-3 border-b border-slate-100 pb-2 flex items-center"><i class="fas fa-history text-slate-400 mr-2"></i> Ultimele Procesări (Gratuite din Cache)</h4>
+            <ul id="lista-istoric" class="space-y-2 text-sm text-slate-600"></ul>
+        </div>
+    </div>
+
+    <script>
+        // === AUTH ===
+        const loginModal = document.getElementById('login-modal');
+        function openLoginModal() { loginModal.classList.add('show'); }
+        function closeLoginModal() { loginModal.classList.remove('show'); }
+
+        function setToken(token) { document.cookie = "viralio_token=" + token + "; domain=.viralio.ro; path=/; max-age=604800; Secure; SameSite=Lax"; }
+        function getToken() { const match = document.cookie.match(/(?:^|; )viralio_token=([^;]*)/); return match ? match[1] : null; }
+        function removeToken() { document.cookie = "viralio_token=; domain=.viralio.ro; path=/; expires=Thu, 01 Jan 1970 00:00:00 GMT"; }
+
+        async function handleCredentialResponse(response) {
+            try {
+                const res = await fetch('/api/auth/google', { 
+                    method: 'POST', 
+                    headers: { 'Content-Type': 'application/json' }, 
+                    body: JSON.stringify({ credential: response.credential }) 
+                });
+                const data = await res.json();
+                if(data.token) { 
+                    setToken(data.token); 
+                    closeLoginModal(); 
+                    updateUI(data.user); 
+                } else if(data.error === 'BETA_FULL') {
+                    alert(data.message);
+                }
+            } catch (e) { alert('Eroare conexiune login.'); }
         }
 
-        const originalTranscript = response.headers.get("x-transcript-original");
-        const translatedTranscript = response.headers.get(
-          "x-transcript-translated"
-        );
+        function updateUI(user) {
+            const btnDesktop = document.getElementById('login-top-btn');
+            if(btnDesktop) btnDesktop.classList.add('hidden');
 
-        document.getElementById("results").style.display = "block";
-        document.getElementById("originalTranscript").textContent =
-          originalTranscript || "N/A";
-        document.getElementById("translatedTranscript").textContent =
-          translatedTranscript || "Fără traducere";
+            const userNav = document.getElementById('user-profile');
+            if(userNav) {
+                userNav.classList.remove('hidden'); 
+                userNav.classList.add('flex');
+            }
+            
+            document.getElementById('nav-name').innerText = user.name.split(' ')[0];
+            document.getElementById('nav-avatar').src = user.picture;
+            document.getElementById('nav-credits').innerText = user.credits;
+        }
 
-        window.open(response.url, "_blank");
-      } catch (err) {
-        console.error("Eroare la descărcare:", err);
-        alert("A apărut o eroare la procesare.");
-      }
+        function logout() { removeToken(); location.reload(); }
+
+        window.onload = async () => {
+            const token = getToken();
+            if(token) {
+                try {
+                    const res = await fetch('/api/auth/me', { headers: { 'Authorization': `Bearer ${token}` } });
+                    if(res.ok) { const data = await res.json(); updateUI(data.user); }
+                    else { removeToken(); }
+                } catch (e) {}
+            }
+            afiseazaIstoric();
+        };
+
+        // === FUNCȚII DE INTERFAȚĂ (ACORDEOANE ȘI COPIERE) ===
+        window.toggleText = function(cardId, type) {
+            const origDiv = document.getElementById(`${cardId}-orig-div`);
+            const transDiv = document.getElementById(`${cardId}-trans-div`);
+            
+            if (type === 'orig') {
+                origDiv.classList.toggle('hidden');
+                transDiv.classList.add('hidden');
+            } else {
+                transDiv.classList.toggle('hidden');
+                origDiv.classList.add('hidden');
+            }
+        };
+
+        window.copyToClipboardText = function(elementId, btn) {
+            const text = document.getElementById(elementId).innerText;
+            if(!text) return; 
+            
+            navigator.clipboard.writeText(text).then(() => {
+                const originalHTML = btn.innerHTML;
+                btn.innerHTML = '<i class="fas fa-check text-green-600 mr-1"></i> Copiat!';
+                btn.classList.add('bg-green-100', 'text-green-700');
+                
+                setTimeout(() => { 
+                    btn.innerHTML = originalHTML; 
+                    btn.classList.remove('bg-green-100', 'text-green-700');
+                }, 2000);
+            }).catch(err => alert('Eroare la copiere: ' + err));
+        }
+
+        // === ISTORIC ===
+        function adaugaInIstoric(urlSursa, downloadUrl) {
+            let istoric = JSON.parse(localStorage.getItem('ytIstoric')) || [];
+            istoric = istoric.filter(item => item.source !== urlSursa);
+            
+            istoric.unshift({ source: urlSursa, link: downloadUrl, time: new Date().toLocaleTimeString() });
+            if (istoric.length > 5) istoric.pop(); 
+            localStorage.setItem('ytIstoric', JSON.stringify(istoric));
+            afiseazaIstoric();
+        }
+
+        function afiseazaIstoric() {
+            let istoric = JSON.parse(localStorage.getItem('ytIstoric')) || [];
+            const container = document.getElementById('istoric-container');
+            const lista = document.getElementById('lista-istoric');
+            
+            if(istoric.length === 0) return;
+            
+            container.classList.remove('hidden');
+            lista.innerHTML = '';
+            istoric.forEach(item => {
+                let li = document.createElement('li');
+                li.className = "flex justify-between items-center bg-slate-50 hover:bg-slate-100 transition-colors p-3 rounded-xl border border-slate-100 cursor-pointer";
+                li.onclick = (e) => { 
+                    if(e.target.tagName !== 'BUTTON' && e.target.tagName !== 'I') {
+                        incarcaDinIstoric(item.source); 
+                    }
+                };
+                
+                li.innerHTML = `<span class="truncate w-2/3 text-xs font-medium text-slate-700" title="${item.source}">${item.source}</span> 
+                                <button onclick="incarcaDinIstoric('${item.source}')" class="text-xs bg-white border border-slate-200 hover:border-red-400 hover:text-red-500 text-slate-800 px-3 py-1.5 rounded-lg font-bold shadow-sm transition-all"><i class="fas fa-bolt text-amber-400 mr-1"></i> Încarcă Instant</button>`;
+                lista.appendChild(li);
+            });
+        }
+
+// ✅ NOU - încarcă în primul rând din link rows
+window.incarcaDinIstoric = function(url) {
+    linkRows[0] = url;
+    renderLinkRows();
+    window.scrollTo({ top: 0, behavior: 'smooth' });
+};
+
+// === LINK ROWS ===
+let linkRows = [''];
+
+function renderLinkRows() {
+    const container = document.getElementById('links-container');
+    container.innerHTML = '';
+    linkRows.forEach((val, i) => {
+        const row = document.createElement('div');
+        row.className = 'flex items-center gap-2';
+        row.id = `link-row-${i}`;
+        row.innerHTML = `
+            <div class="w-6 h-6 rounded-md bg-slate-100 border border-slate-200 flex items-center justify-center text-[0.65rem] font-black text-slate-400 shrink-0">${i + 1}</div>
+            <input type="text"
+                class="flex-1 bg-slate-50 border border-slate-200 rounded-xl px-4 py-2.5 text-sm font-medium text-slate-800 outline-none focus:border-red-400 focus:ring-2 focus:ring-red-50 transition-all placeholder-slate-300 ${val ? 'border-red-200 bg-white' : ''}"
+                placeholder="https://www.youtube.com/watch?v=..."
+                value="${escAttr(val)}"
+                oninput="updateLink(${i}, this.value)"
+                onpaste="onPasteLink(${i}, event)"
+            >
+            ${linkRows.length > 1
+                ? `<button onclick="removeLinkRow(${i})" class="w-8 h-8 shrink-0 flex items-center justify-center rounded-lg border border-slate-200 text-slate-300 hover:text-red-500 hover:border-red-300 hover:bg-red-50 transition-all text-xs"><i class="fas fa-xmark"></i></button>`
+                : `<div class="w-8 shrink-0"></div>`
+            }
+        `;
+        container.appendChild(row);
+    });
+    document.getElementById('link-count').innerText = linkRows.length;
+    const addBtn = document.getElementById('add-link-btn');
+    if (linkRows.length >= 5) {
+        addBtn.disabled = true;
+        addBtn.innerHTML = '<i class="fas fa-lock text-xs"></i> Maxim 5 linkuri';
+        addBtn.classList.add('opacity-40', 'cursor-not-allowed');
+    } else {
+        addBtn.disabled = false;
+        addBtn.innerHTML = '<i class="fas fa-plus text-xs"></i> Adaugă link';
+        addBtn.classList.remove('opacity-40', 'cursor-not-allowed');
     }
-  </script>
+}
+
+function updateLink(i, val) {
+    linkRows[i] = val.trim();
+    const inp = document.querySelector(`#link-row-${i} input`);
+    if (inp) {
+        inp.classList.toggle('border-red-200', !!val.trim());
+        inp.classList.toggle('bg-white', !!val.trim());
+    }
+}
+
+function onPasteLink(i, event) {
+    const pasted = (event.clipboardData || window.clipboardData).getData('text');
+    const lines = pasted.split(/\n/).map(l => l.trim()).filter(l => l.includes('youtu'));
+    if (lines.length > 1) {
+        event.preventDefault();
+        lines.forEach((line, j) => {
+            if (i + j < 5) {
+                if (i + j >= linkRows.length) linkRows.push('');
+                linkRows[i + j] = line;
+            }
+        });
+        linkRows = linkRows.slice(0, 5);
+        renderLinkRows();
+    }
+}
+
+function addLinkRow() {
+    if (linkRows.length >= 5) return;
+    linkRows.push('');
+    renderLinkRows();
+    setTimeout(() => {
+        const inputs = document.querySelectorAll('#links-container input');
+        if (inputs.length) inputs[inputs.length - 1].focus();
+    }, 50);
+}
+
+function removeLinkRow(i) {
+    linkRows.splice(i, 1);
+    renderLinkRows();
+}
+
+function escAttr(s) { return (s || '').replace(/"/g, '&quot;'); }
+
+document.addEventListener('DOMContentLoaded', renderLinkRows);
+window.addEventListener('load', renderLinkRows);
+
+// === LOGICA BATCH ===
+document.getElementById('run-btn').addEventListener('click', async () => {
+    const token = getToken();
+    if (!token) { openLoginModal(); return; }
+
+    const validUrls = linkRows.filter(l => l && l.includes('youtu'));
+    const rezolutie = document.getElementById('rezolutie-select').value;
+
+    if (validUrls.length === 0) return alert('Adaugă cel puțin un link valid de YouTube!');
+
+    const btn = document.getElementById('run-btn');
+    const container = document.getElementById('results-container');
+
+    btn.disabled = true;
+    btn.innerHTML = '<i class="fas fa-circle-notch fa-spin"></i> SE PROCESEAZĂ...';
+    container.innerHTML = '';
+
+    // Creăm cardurile pentru toate linkurile
+    const jobs = [];
+    validUrls.forEach((url, index) => {
+        const cardId = `job-card-${index}`;
+        jobs.push({ id: cardId, url });
+        container.innerHTML += `
+            <div id="${cardId}" class="bg-white rounded-2xl border border-slate-200 shadow-sm p-5 transition-all duration-300">
+                <div class="flex flex-col md:flex-row md:items-center justify-between gap-3">
+                    <div class="flex items-center gap-3 overflow-hidden">
+                        <div id="${cardId}-icon" class="w-10 h-10 rounded-full bg-slate-100 flex items-center justify-center shrink-0 text-slate-400">
+                            <i class="fas fa-clock"></i>
+                        </div>
+                        <span class="font-medium text-slate-700 truncate w-full md:w-96 text-sm" title="${url}">${url}</span>
+                    </div>
+                    <div id="${cardId}-status" class="px-3 py-1.5 rounded-full text-xs font-bold bg-slate-100 text-slate-500 w-max shrink-0">
+                        În așteptare...
+                    </div>
+                </div>
+                <div id="${cardId}-body" class="hidden mt-5 pt-5 border-t border-slate-100"></div>
+            </div>
+        `;
+    });
+
+    // Procesăm secvențial
+    for (const job of jobs) {
+        const cardEl = document.getElementById(job.id);
+        const iconEl = document.getElementById(`${job.id}-icon`);
+        const statusEl = document.getElementById(`${job.id}-status`);
+        const bodyEl = document.getElementById(`${job.id}-body`);
+
+        cardEl.classList.add('card-processing');
+        iconEl.className = "w-10 h-10 rounded-full bg-red-50 flex items-center justify-center shrink-0 text-red-500";
+        iconEl.innerHTML = '<i class="fas fa-circle-notch fa-spin"></i>';
+        statusEl.className = "px-3 py-1.5 rounded-full text-xs font-bold bg-amber-100 text-amber-600 w-max shrink-0";
+        statusEl.innerText = "Procesare în curs...";
+        cardEl.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+
+        try {
+            const res = await fetch('/api/process-yt', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
+                body: JSON.stringify({ url: job.url, resolution: rezolutie })
+            });
+            const data = await res.json();
+            if (!res.ok) throw new Error(data.error || "Eroare server.");
+
+            document.getElementById('nav-credits').innerText = data.creditsLeft;
+            adaugaInIstoric(job.url, data.downloadUrl);
+
+            cardEl.classList.remove('card-processing');
+            cardEl.classList.add('border-green-200');
+            iconEl.className = "w-10 h-10 rounded-full bg-green-100 flex items-center justify-center shrink-0 text-green-600";
+            iconEl.innerHTML = '<i class="fas fa-check"></i>';
+            statusEl.className = "px-3 py-1.5 rounded-full text-xs font-bold bg-green-100 text-green-700 w-max shrink-0";
+            statusEl.innerText = "Finalizat ✓";
+
+            bodyEl.classList.remove('hidden');
+            bodyEl.innerHTML = `
+                <div class="flex flex-col gap-4">
+                    <a href="${data.downloadUrl}" download class="w-full flex items-center justify-center gap-2 bg-slate-900 hover:bg-viralio-600 text-white px-6 py-3 rounded-xl font-bold shadow-md transition-all">
+                        <i class="fas fa-download text-red-400"></i> DESCARCĂ VIDEO MP4
+                    </a>
+                    <div class="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                        <button onclick="toggleText('${job.id}', 'orig')" class="w-full bg-slate-50 border border-slate-200 hover:bg-slate-100 text-slate-700 font-semibold py-2 rounded-lg text-sm transition-colors">
+                            <i class="fas fa-closed-captioning text-slate-400 mr-1"></i> Afișează Original
+                        </button>
+                        <button onclick="toggleText('${job.id}', 'trans')" class="w-full bg-indigo-50 border border-indigo-100 hover:bg-indigo-100 text-indigo-700 font-semibold py-2 rounded-lg text-sm transition-colors">
+                            <i class="fas fa-language text-viralio-400 mr-1"></i> Afișează Traducerea
+                        </button>
+                    </div>
+                    <div id="${job.id}-orig-div" class="hidden bg-slate-50 rounded-xl p-4 border border-slate-200 relative">
+                        <button onclick="copyToClipboardText('${job.id}-orig-text', this)" class="absolute top-2 right-2 text-xs bg-white border border-slate-200 text-slate-600 px-2 py-1 rounded shadow-sm hover:bg-slate-100 font-bold transition-all"><i class="fas fa-copy"></i> Copy</button>
+                        <h5 class="text-xs font-bold text-slate-400 uppercase mb-2">Transcript Original</h5>
+                        <p id="${job.id}-orig-text" class="text-sm text-slate-700 max-h-60 overflow-y-auto whitespace-pre-wrap leading-relaxed pr-2">${data.originalText}</p>
+                    </div>
+                    <div id="${job.id}-trans-div" class="hidden bg-indigo-50 rounded-xl p-4 border border-indigo-100 relative">
+                        <button onclick="copyToClipboardText('${job.id}-trans-text', this)" class="absolute top-2 right-2 text-xs bg-white border border-indigo-200 text-indigo-600 px-2 py-1 rounded shadow-sm hover:bg-indigo-100 font-bold transition-all"><i class="fas fa-copy"></i> Copy</button>
+                        <h5 class="text-xs font-bold text-indigo-400 uppercase mb-2">Traducere (Română)</h5>
+                        <p id="${job.id}-trans-text" class="text-sm text-slate-800 font-medium max-h-60 overflow-y-auto whitespace-pre-wrap leading-relaxed pr-2">${data.translatedText}</p>
+                    </div>
+                </div>
+            `;
+        } catch (err) {
+            cardEl.classList.remove('card-processing');
+            cardEl.classList.add('border-red-200');
+            iconEl.className = "w-10 h-10 rounded-full bg-red-100 flex items-center justify-center shrink-0 text-red-600";
+            iconEl.innerHTML = '<i class="fas fa-exclamation-triangle"></i>';
+            statusEl.className = "px-3 py-1.5 rounded-full text-xs font-bold bg-red-100 text-red-700 w-max shrink-0";
+            statusEl.innerText = "Eroare";
+            bodyEl.classList.remove('hidden');
+            bodyEl.innerHTML = `<p class="text-sm font-bold text-red-500 bg-red-50 p-3 rounded-lg border border-red-100">${err.message}</p>`;
+        }
+    }
+
+    btn.disabled = false;
+    btn.innerHTML = 'PROCESEAZĂ <i class="fa-solid fa-arrow-right"></i>';
+});
+    </script>
+    
+    <div class="fixed bottom-5 right-5 md:right-6 z-[100000] flex items-center bg-white/70 backdrop-blur-2xl glass-premium-fin rounded-full p-1.5 transition-all duration-500 hover:-translate-y-1 hover:shadow-[0_15px_40px_-10px_rgba(0,0,0,0.2)] hover:bg-white/90">
+        <a href="https://discord.gg/h8Ah6VKDzm" target="_blank" class="group flex items-center gap-2 hover:bg-slate-100 rounded-full px-3 py-1.5 transition-all duration-300">
+            <div class="flex items-center justify-center w-10 h-10 rounded-full bg-slate-900 text-white shadow-sm group-hover:bg-[#5865F2] group-hover:scale-105 transition-all duration-300">
+                <i class="fa-brands fa-discord text-sm"></i>
+            </div>
+            <div class="flex-col hidden sm:flex text-left">
+                <span class="text-[0.55rem] font-bold text-slate-400 uppercase tracking-widest leading-none mb-0.5">Ai Întrebări?</span>
+                <span class="text-xs font-black text-slate-800 leading-none group-hover:text-black transition-colors duration-300">Suport Discord</span>
+            </div>
+        </a>
+        <div class="w-px h-6 bg-gradient-to-b from-transparent via-slate-300 to-transparent mx-1"></div>
+        <a href="https://t.me/SmartCreator_official" target="_blank" class="group flex items-center gap-2 rounded-full px-3 py-1.5 transition-all duration-300">
+            <div class="relative flex items-center justify-center w-10 h-10 group-hover:scale-110 transition-transform duration-300">
+                <div class="absolute inset-0 rounded-full bg-gradient-to-br from-[#0088cc] to-[#00aaff] overflow-hidden shadow-[0_0_15px_rgba(0,136,204,0.4)]">
+                    <div class="absolute inset-0 w-[250%] h-full bg-gradient-to-r from-transparent via-white/60 to-transparent animate-shine-fast z-10"></div>
+                </div>
+                <i class="fa-brands fa-telegram text-white text-sm pr-0.5 relative z-20"></i>
+                <span class="absolute -top-1 -right-1 w-2.5 h-2.5 bg-red-500 rounded-full border-2 border-white animate-pulse z-30 shadow-sm"></span>
+            </div>
+            <div class="flex-col hidden sm:flex text-left">
+                <span class="text-[0.55rem] font-bold text-red-500 uppercase tracking-widest leading-none mb-0.5 drop-shadow-sm">Giveaways</span>
+                <span class="text-xs font-black text-slate-800 leading-none group-hover:text-[#0088cc] transition-colors duration-300">Telegram VIP</span>
+            </div>
+        </a>
+    </div>
 </body>
 </html>
